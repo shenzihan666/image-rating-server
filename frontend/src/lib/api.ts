@@ -1,0 +1,212 @@
+/**
+ * API Client for communicating with the FastAPI backend
+ */
+import type { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
+import axios, { AxiosInstance } from "axios";
+
+import { getAccessToken, removeTokens } from "./auth";
+import type { UploadResponse, TokenResponse, User } from "@/types";
+
+// API base URL from environment variable
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+// API response interface
+export interface ApiResponse<T = unknown> {
+  data: T;
+  message?: string;
+}
+
+// API error interface
+export interface ApiError {
+  detail: string;
+  status?: number;
+}
+
+/**
+ * Create axios instance with default configuration
+ */
+const createApiClient = (): AxiosInstance => {
+  const client = axios.create({
+    baseURL: `${API_URL}/api/v1`,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    timeout: 30000,
+  });
+
+  // Request interceptor - Add auth token
+  client.interceptors.request.use(
+    (config) => {
+      const token = getAccessToken();
+      if (token && config.headers) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+      return config;
+    },
+    (error) => Promise.reject(error)
+  );
+
+  // Response interceptor - Handle errors
+  client.interceptors.response.use(
+    (response) => response,
+    async (error: AxiosError<ApiError>) => {
+      // Handle 401 Unauthorized
+      if (error.response?.status === 401) {
+        removeTokens();
+        // Redirect to login page (only in browser)
+        if (typeof window !== "undefined") {
+          window.location.href = "/login";
+        }
+      }
+
+      // Return formatted error
+      const apiError: ApiError = {
+        detail: error.response?.data?.detail || error.message || "An error occurred",
+        status: error.response?.status,
+      };
+
+      return Promise.reject(apiError);
+    }
+  );
+
+  return client;
+};
+
+// Export singleton instance
+export const apiClient = createApiClient();
+
+/**
+ * API methods
+ */
+export const api = {
+  get: <T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> =>
+    apiClient.get<T>(url, config),
+
+  post: <T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> => apiClient.post<T>(url, data, config),
+
+  put: <T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> => apiClient.put<T>(url, data, config),
+
+  patch: <T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig
+  ): Promise<AxiosResponse<T>> => apiClient.patch<T>(url, data, config),
+
+  delete: <T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> =>
+    apiClient.delete<T>(url, config),
+};
+
+/**
+ * Authentication API
+ */
+export const authApi = {
+  login: (email: string, password: string) =>
+    api.post<TokenResponse>("/auth/login", { email, password }),
+
+  register: (email: string, password: string, full_name: string) =>
+    api.post<TokenResponse>("/auth/register", { email, password, full_name }),
+
+  logout: () => api.post("/auth/logout"),
+
+  refreshToken: (refreshToken: string) =>
+    api.post<TokenResponse>("/auth/refresh", { refresh_token: refreshToken }),
+
+  getMe: () => api.get<User>("/auth/me"),
+};
+
+/**
+ * User API
+ */
+export const userApi = {
+  getProfile: () => api.get("/users/me"),
+
+  updateProfile: (data: { full_name?: string; email?: string }) =>
+    api.patch("/users/me", data),
+
+  changePassword: (oldPassword: string, newPassword: string) =>
+    api.post("/users/me/change-password", {
+      old_password: oldPassword,
+      new_password: newPassword,
+    }),
+
+  listUsers: (page: number = 1, pageSize: number = 20) =>
+    api.get("/users/", { params: { page, page_size: pageSize } }),
+
+  getUser: (userId: string) => api.get(`/users/${userId}`),
+};
+
+/**
+ * AI Model interface
+ */
+export interface AIModel {
+  name: string;
+  description: string;
+  is_active: boolean;
+  is_loaded: boolean;
+}
+
+/**
+ * AI Analyze API
+ */
+export const aiAnalyzeApi = {
+  getModels: () => api.get<AIModel[]>("/ai/models"),
+
+  setActiveModel: (modelName: string) =>
+    api.post("/ai/models/active", { model_name: modelName }),
+
+  getActiveModel: () => api.get<AIModel | null>("/ai/models/active"),
+
+  deactivateActiveModel: () => api.delete("/ai/models/active"),
+};
+
+/**
+ * Upload progress callback type
+ */
+export type UploadProgressCallback = (progress: number) => void;
+
+/**
+ * Upload API
+ */
+export const uploadApi = {
+  /**
+   * Upload images with optional pre-computed hashes
+   */
+  uploadImages: async (
+    files: File[],
+    hashes?: string[],
+    onProgress?: UploadProgressCallback
+  ): Promise<AxiosResponse<UploadResponse>> => {
+    const formData = new FormData();
+
+    // Append files
+    files.forEach((file) => {
+      formData.append("images", file);
+    });
+
+    // Append hashes if provided
+    if (hashes && hashes.length > 0) {
+      formData.append("hashes", JSON.stringify(hashes));
+    }
+
+    return apiClient.post<UploadResponse>("/upload", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+      timeout: 120000, // 2 minutes for large uploads
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          onProgress(progress);
+        }
+      },
+    });
+  },
+};

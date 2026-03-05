@@ -12,6 +12,7 @@ import { authApi } from "@/lib/api";
 import { setTokens } from "@/lib/auth";
 import { useAuthStore } from "@/store/auth-store";
 import { toast } from "@/hooks/use-toast";
+import type { TokenResponse, User } from "@/types";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -29,12 +30,13 @@ export default function LoginPage() {
 
     try {
       const response = await authApi.login(email, password);
-      const { access_token, refresh_token } = response.data;
-
+      const data = response.data as TokenResponse;
+      const { access_token, refresh_token } = data;
       setTokens(access_token, refresh_token);
 
       const userResponse = await authApi.getMe();
-      setUser(userResponse.data);
+      const userData = userResponse.data as User;
+      setUser(userData);
 
       toast({
         title: "Welcome back!",
