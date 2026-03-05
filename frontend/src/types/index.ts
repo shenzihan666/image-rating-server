@@ -102,3 +102,46 @@ export interface AppState {
   isLoading: boolean;
   isAuthenticated: boolean;
 }
+
+/**
+ * Upload types
+ */
+export type UploadStatus = "success" | "duplicated" | "failed";
+
+export interface ImageMetadata {
+  image_id: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  width?: number;
+  height?: number;
+  file_path: string;
+  hash_sha256: string;
+}
+
+export interface UploadResult {
+  status: UploadStatus;
+  original_filename: string;
+  metadata?: ImageMetadata;
+  error_message?: string;
+  is_duplicate: boolean;
+}
+
+export interface UploadResponse {
+  success: boolean;
+  total: number;
+  succeeded: number;
+  duplicated: number;
+  failed: number;
+  results: UploadResult[];
+  message: string;
+}
+
+export interface UploadHistoryItem {
+  id: string;
+  file: File;
+  preview?: string;
+  status: "pending" | "uploading" | "success" | "duplicated" | "failed";
+  progress: number;
+  result?: UploadResult;
+}

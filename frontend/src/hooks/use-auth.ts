@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { getUserFromToken, isAuthenticated, removeTokens } from "@/lib/auth";
 import { useAuthStore } from "@/store/auth-store";
 import { authApi } from "@/lib/api";
+import type { User } from "@/types";
 
 export function useAuth() {
   const { user, setUser, setLoading, logout: storeLogout } = useAuthStore();
@@ -21,7 +22,7 @@ export function useAuth() {
         try {
           // Try to fetch current user data
           const response = await authApi.getMe();
-          setUser(response.data);
+          setUser(response.data as User);
         } catch {
           // If request fails, try to get from token
           const tokenUser = getUserFromToken();

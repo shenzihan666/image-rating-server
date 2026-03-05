@@ -1,5 +1,5 @@
 /**
- * Login form component
+ * Register form component
  */
 "use client";
 
@@ -13,14 +13,15 @@ import { setTokens } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import type { TokenResponse } from "@/types";
 
-interface LoginFormProps {
+interface RegisterFormProps {
   onSuccess?: () => void;
 }
 
-export function LoginForm({ onSuccess }: LoginFormProps) {
+export function RegisterForm({ onSuccess }: RegisterFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +31,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
     setError(null);
 
     try {
-      const response = await authApi.login(email, password);
+      const response = await authApi.register(email, password, fullName);
       const data = response.data as TokenResponse;
       const { access_token, refresh_token } = data;
       setTokens(access_token, refresh_token);
@@ -38,7 +39,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       router.push("/dashboard");
     } catch (err: unknown) {
       const apiError = err as { detail?: string };
-      setError(apiError.detail || "Login failed");
+      setError(apiError.detail || "Registration failed");
     } finally {
       setIsLoading(false);
     }
@@ -46,6 +47,17 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="fullName">Full Name</Label>
+        <Input
+          id="fullName"
+          type="text"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          required
+          disabled={isLoading}
+        />
+      </div>
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
@@ -70,7 +82,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Button type="submit" className="w-full" disabled={isLoading}>
-        {isLoading ? "Signing in..." : "Sign in"}
+        {isLoading ? "Creating account..." : "Create account"}
       </Button>
     </form>
   );
