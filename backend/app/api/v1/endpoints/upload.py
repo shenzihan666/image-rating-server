@@ -20,7 +20,7 @@ router = APIRouter()
 async def upload_images(
     current_user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    images: Annotated[list[UploadFile] | None, File(description="Image files to upload")] = None,
+    images: Annotated[list[UploadFile], File(description="Image files to upload")],
     hashes: Annotated[str | None, Form(description="JSON array of SHA256 hashes")] = None,
     upload_service: ConcurrentUploadService = Depends(get_concurrent_upload_service),
 ) -> UploadResponse:
@@ -42,8 +42,10 @@ async def upload_images(
     """
     user_id = current_user["user_id"]
 
+    # Pass get_db as session factory - each concurrent upload task
+    # will create its own session to avoid race conditions
     return await upload_service.process_batch_upload(
-        db=db,
+        session_factory=get_db,
         files=images,
         hashes_json=hashes,
         user_id=user_id,

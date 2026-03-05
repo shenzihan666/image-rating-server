@@ -1,10 +1,10 @@
 /**
  * API Client for communicating with the FastAPI backend
+ * Updated to work with NextAuth.js session
  */
 import type { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios, { AxiosInstance } from "axios";
 
-import { getAccessToken, removeTokens } from "./auth";
 import type { UploadResponse, TokenResponse, User } from "@/types";
 
 // API base URL from environment variable
@@ -22,24 +22,43 @@ export interface ApiError {
   status?: number;
 }
 
+// Token getter function type
+let tokenGetter: (() => Promise<string | null>) | null = null;
+
+/**
+ * Set the token getter function (called from SessionProvider context)
+ */
+export function setTokenGetter(getter: () => Promise<string | null>): void {
+  tokenGetter = getter;
+}
+
 /**
  * Create axios instance with default configuration
  */
 const createApiClient = (): AxiosInstance => {
   const client = axios.create({
     baseURL: `${API_URL}/api/v1`,
-    headers: {
-      "Content-Type": "application/json",
-    },
     timeout: 30000,
   });
 
   // Request interceptor - Add auth token
   client.interceptors.request.use(
-    (config) => {
-      const token = getAccessToken();
-      if (token && config.headers) {
-        config.headers.Authorization = `Bearer ${token}`;
+    async (config) => {
+      // Let browser/axios set multipart boundaries automatically for FormData.
+      if (typeof FormData !== "undefined" && config.data instanceof FormData && config.headers) {
+        if (typeof (config.headers as { set?: (name: string, value?: string) => void }).set === "function") {
+          (config.headers as { set: (name: string, value?: string) => void }).set("Content-Type", undefined);
+        } else {
+          delete (config.headers as Record<string, string>)["Content-Type"];
+        }
+      }
+
+      // Try to get token from the token getter (NextAuth session)
+      if (tokenGetter) {
+        const token = await tokenGetter();
+        if (token && config.headers) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
       }
       return config;
     },
@@ -52,10 +71,12 @@ const createApiClient = (): AxiosInstance => {
     async (error: AxiosError<ApiError>) => {
       // Handle 401 Unauthorized
       if (error.response?.status === 401) {
-        removeTokens();
-        // Redirect to login page (only in browser)
+        // NextAuth will handle token refresh, so if we get 401,
+        // the session might be invalid. Force sign out.
         if (typeof window !== "undefined") {
-          window.location.href = "/login";
+          // Import signOut dynamically to avoid circular dependencies
+          const { signOut } = await import("next-auth/react");
+          await signOut({ callbackUrl: "/login" });
         }
       }
 
@@ -106,13 +127,16 @@ export const api = {
 
 /**
  * Authentication API
+ * Note: Login is handled by NextAuth, these are for internal use
  */
 export const authApi = {
+  // Login is handled by NextAuth credentials provider
+  // This method is kept for potential direct use but should not be used normally
   login: (email: string, password: string) =>
     api.post<TokenResponse>("/auth/login", { email, password }),
 
-  register: (email: string, password: string, full_name: string) =>
-    api.post<TokenResponse>("/auth/register", { email, password, full_name }),
+  // Register endpoint is removed from backend
+  register: undefined,
 
   logout: () => api.post("/auth/logout"),
 
@@ -197,9 +221,6 @@ export const uploadApi = {
     }
 
     return apiClient.post<UploadResponse>("/upload", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
       timeout: 120000, // 2 minutes for large uploads
       onUploadProgress: (progressEvent) => {
         if (onProgress && progressEvent.total) {

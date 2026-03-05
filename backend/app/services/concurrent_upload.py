@@ -3,6 +3,7 @@ Concurrent upload control service
 """
 import asyncio
 import json
+from collections.abc import AsyncGenerator, Callable
 
 from fastapi import UploadFile
 from loguru import logger
@@ -11,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.schemas.upload import UploadResponse, UploadResult, UploadStatus
 from app.services.image_upload import ImageUploadService, get_upload_service
+
+# Type alias for session factory
+SessionFactory = Callable[[], AsyncGenerator[AsyncSession, None]]
 
 
 class ConcurrentUploadService:
@@ -34,7 +38,7 @@ class ConcurrentUploadService:
 
     async def _process_with_semaphore(
         self,
-        db: AsyncSession,
+        session_factory: SessionFactory,
         file: UploadFile,
         provided_hash: str | None,
         user_id: str,
@@ -42,8 +46,11 @@ class ConcurrentUploadService:
         """
         Process single upload with semaphore control.
 
+        Each concurrent task creates its own database session to avoid
+        race conditions with shared session state.
+
         Args:
-            db: Database session
+            session_factory: Factory function to create new database sessions
             file: UploadFile object
             provided_hash: Hash provided by client
             user_id: User ID
@@ -52,11 +59,29 @@ class ConcurrentUploadService:
             UploadResult
         """
         async with self.semaphore:
-            return await self.upload_service.process_single_upload(
-                db=db,
-                file=file,
-                provided_hash=provided_hash,
-                user_id=user_id,
+            # Create a new session for this specific upload task
+            async for db in session_factory():
+                try:
+                    return await self.upload_service.process_single_upload(
+                        db=db,
+                        file=file,
+                        provided_hash=provided_hash,
+                        user_id=user_id,
+                    )
+                except Exception as e:
+                    logger.error(f"Error in concurrent upload task: {e}")
+                    return UploadResult(
+                        status=UploadStatus.FAILED,
+                        original_filename=file.filename or "unknown",
+                        error_message=str(e),
+                        is_duplicate=False,
+                    )
+            # This should never be reached, but satisfy type checker
+            return UploadResult(
+                status=UploadStatus.FAILED,
+                original_filename=file.filename or "unknown",
+                error_message="Failed to create database session",
+                is_duplicate=False,
             )
 
     def _parse_hashes(self, hashes_json: str | None, file_count: int) -> list[str | None]:
@@ -90,7 +115,7 @@ class ConcurrentUploadService:
 
     async def process_batch_upload(
         self,
-        db: AsyncSession,
+        session_factory: SessionFactory,
         files: list[UploadFile] | None,
         hashes_json: str | None,
         user_id: str,
@@ -98,8 +123,11 @@ class ConcurrentUploadService:
         """
         Process batch upload with concurrent control.
 
+        Each concurrent upload task gets its own database session to ensure
+        thread-safety and avoid race conditions with shared session state.
+
         Args:
-            db: Database session
+            session_factory: Factory function to create new database sessions
             files: List of UploadFile objects (None or empty allowed)
             hashes_json: JSON string of hashes array
             user_id: User ID
@@ -135,9 +163,10 @@ class ConcurrentUploadService:
         hashes = self._parse_hashes(hashes_json, len(files))
 
         # Create tasks for concurrent processing
+        # Each task will create its own database session from the factory
         tasks = [
             self._process_with_semaphore(
-                db=db,
+                session_factory=session_factory,
                 file=file,
                 provided_hash=hash_val,
                 user_id=user_id,

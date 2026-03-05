@@ -28,7 +28,7 @@ class Image(Base):
     width: int = Column(Integer, nullable=True)
     height: int = Column(Integer, nullable=True)
     mime_type: str = Column(String(100), nullable=False)
-    hash_sha256: str = Column(String(64), nullable=True, index=True)  # SHA256 hash for deduplication
+    hash_sha256: str = Column(String(64), nullable=True, unique=True, index=True)  # SHA256 hash for deduplication
     average_rating: float = Column(Float, default=0.0)
     rating_count: int = Column(Integer, default=0)
     created_at: datetime = Column(DateTime, default=datetime.utcnow)

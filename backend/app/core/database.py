@@ -3,7 +3,9 @@ Database configuration and session management
 """
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from loguru import logger
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
@@ -53,6 +55,35 @@ async def init_db() -> None:
     import app.models  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _apply_schema_migrations(conn)
+
+
+async def _apply_schema_migrations(conn: AsyncConnection) -> None:
+    """
+    Apply lightweight in-app migrations for existing SQLite databases.
+
+    This keeps backward compatibility when models add new columns but
+    the local DB file predates those schema changes.
+    """
+    # Add missing hash column used by upload deduplication.
+    has_hash_column = await _has_column(conn, "images", "hash_sha256")
+    if not has_hash_column:
+        await conn.exec_driver_sql("ALTER TABLE images ADD COLUMN hash_sha256 VARCHAR(64)")
+        logger.info("Applied schema migration: added images.hash_sha256 column")
+
+    # Add index for fast dedup checks. Keep startup resilient if unique index fails.
+    try:
+        await conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_images_hash_sha256 ON images (hash_sha256)"
+        )
+    except SQLAlchemyError as e:
+        logger.warning(f"Could not create unique index ix_images_hash_sha256: {e}")
+
+
+async def _has_column(conn: AsyncConnection, table_name: str, column_name: str) -> bool:
+    """Check whether a table contains a specific column."""
+    result = await conn.exec_driver_sql(f'PRAGMA table_info("{table_name}")')
+    return any(row[1] == column_name for row in result.fetchall())
 
 
 async def close_db() -> None:

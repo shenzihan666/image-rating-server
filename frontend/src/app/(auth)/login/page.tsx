@@ -1,22 +1,21 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { signIn } from "next-auth/react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { authApi } from "@/lib/api";
-import { setTokens } from "@/lib/auth";
-import { useAuthStore } from "@/store/auth-store";
 import { toast } from "@/hooks/use-toast";
-import type { TokenResponse, User } from "@/types";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
-  const { setUser } = useAuthStore();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
+
   const [email, setEmail] = useState("demo@example.com");
   const [password, setPassword] = useState("password123");
   const [showPassword, setShowPassword] = useState(false);
@@ -29,24 +28,24 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const response = await authApi.login(email, password);
-      const data = response.data as TokenResponse;
-      const { access_token, refresh_token } = data;
-      setTokens(access_token, refresh_token);
-
-      const userResponse = await authApi.getMe();
-      const userData = userResponse.data as User;
-      setUser(userData);
-
-      toast({
-        title: "Welcome back!",
-        description: "You have successfully logged in.",
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
       });
 
-      router.push("/dashboard");
+      if (result?.error) {
+        setError("Invalid email or password. Please try again.");
+      } else {
+        toast({
+          title: "Welcome back!",
+          description: "You have successfully logged in.",
+        });
+        router.push(callbackUrl);
+      }
     } catch (err: unknown) {
-      const apiError = err as { detail?: string };
-      setError(apiError.detail || "Login failed. Please try again.");
+      const apiError = err as { message?: string };
+      setError(apiError.message || "Login failed. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -143,5 +142,19 @@ export default function LoginPage() {
         </div>
       </motion.div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-[#F5F5F5]">
+          <Loader2 className="w-8 h-8 animate-spin text-[#333333]" />
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

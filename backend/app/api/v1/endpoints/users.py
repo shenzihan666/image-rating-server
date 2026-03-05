@@ -15,24 +15,7 @@ from app.services.user import UserService
 router = APIRouter()
 
 
-# Request/Response Schemas
-class UserResponseSchema(BaseModel):
-    """User response schema."""
-
-    user_id: str
-    email: str
-    full_name: str
-    is_active: bool
-    created_at: str | None = None
-
-
-class UserUpdateRequest(BaseModel):
-    """User update request schema."""
-
-    full_name: str | None = Field(None, min_length=1, max_length=100)
-    email: EmailStr | None = None
-
-
+# Request/Response Schemas (only those not in schemas/user.py)
 class PasswordChangeRequest(BaseModel):
     """Password change request schema."""
 
@@ -43,7 +26,7 @@ class PasswordChangeRequest(BaseModel):
 class UserListResponse(BaseModel):
     """User list response schema."""
 
-    users: list[UserResponseSchema]
+    users: list[UserResponse]
     total: int
     page: int
     page_size: int
@@ -84,7 +67,7 @@ async def get_user_profile(
 
 @router.patch("/me", response_model=UserResponse)
 async def update_user_profile(
-    request: UserUpdateRequest,
+    request: UserUpdate,
     current_user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserResponse:
@@ -101,13 +84,7 @@ async def update_user_profile(
     """
     user_service = UserService(db)
 
-    # Convert request to UserUpdate schema
-    update_data = UserUpdate(
-        full_name=request.full_name,
-        email=request.email,
-    )
-
-    result = await user_service.update(current_user["user_id"], update_data)
+    result = await user_service.update(current_user["user_id"], request)
 
     if not result:
         raise HTTPException(
@@ -207,7 +184,7 @@ async def list_users(
 
     return UserListResponse(
         users=[
-            UserResponseSchema(
+            UserResponse(
                 user_id=user.id,
                 email=user.email,
                 full_name=user.full_name,

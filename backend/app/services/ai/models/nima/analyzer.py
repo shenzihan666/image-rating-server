@@ -1,6 +1,7 @@
 """
 NIMA Analyzer implementation
 """
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,22 @@ from torchvision import transforms
 
 from app.services.ai.base import BaseAIAnalyzer
 from app.services.ai.models.nima.model import NIMA
+
+
+def _sync_load_weights(model_path: Path, device: torch.device) -> dict | None:
+    """
+    Synchronously load model weights from disk.
+
+    This is a blocking operation and should be run in a thread pool.
+
+    Args:
+        model_path: Path to the model weights file
+        device: Target device for loading
+
+    Returns:
+        State dict or None if loading fails
+    """
+    return torch.load(model_path, map_location=device, weights_only=False)
 
 
 class NIMAAnalyzer(BaseAIAnalyzer):
@@ -71,16 +88,20 @@ class NIMAAnalyzer(BaseAIAnalyzer):
             # Initialize model
             self._model = NIMA(num_classes=5, backbone="squeeze")
 
-            # Load weights
+            # Load weights (async to avoid blocking event loop)
             model_path = Path(self._model_path)
             if model_path.exists():
-                state_dict = torch.load(model_path, map_location=self._device, weights_only=False)
-                if hasattr(state_dict, "state_dict"):
-                    state_dict = state_dict.state_dict()
-                elif isinstance(state_dict, dict) and "state_dict" in state_dict:
-                    state_dict = state_dict["state_dict"]
-                self._model.load_state_dict(state_dict)
-                logger.info(f"Loaded weights from: {model_path}")
+                # torch.load is a blocking I/O operation, run in thread pool
+                state_dict = await asyncio.to_thread(
+                    _sync_load_weights, model_path, self._device
+                )
+                if state_dict is not None:
+                    if hasattr(state_dict, "state_dict"):
+                        state_dict = state_dict.state_dict()
+                    elif isinstance(state_dict, dict) and "state_dict" in state_dict:
+                        state_dict = state_dict["state_dict"]
+                    self._model.load_state_dict(state_dict)
+                    logger.info(f"Loaded weights from: {model_path}")
             else:
                 logger.warning(f"Model weights not found at: {model_path}")
 

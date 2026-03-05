@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useSession, signOut } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -14,9 +15,8 @@ import {
   Menu,
   X,
   Bot,
+  Loader2,
 } from "lucide-react";
-
-import { isAuthenticated } from "@/lib/auth";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -32,41 +32,31 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [isAuth, setIsAuth] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const { status } = useSession();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
-  useEffect(() => {
-    const auth = isAuthenticated();
-    if (!auth) {
-      router.push("/login");
-    } else {
-      setIsAuth(true);
-    }
-    setIsLoading(false);
-  }, [router]);
-
-  const handleLogout = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    router.push("/login");
-  };
-
-  if (isLoading) {
+  // Handle loading state
+  if (status === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F5F5F5]">
         <div className="text-center">
-          <div className="w-10 h-10 border-2 border-[#333333] border-t-transparent rounded-full animate-spin mx-auto" />
+          <Loader2 className="w-10 h-10 animate-spin mx-auto text-[#333333]" />
           <p className="mt-4 text-[#333333]/60">Loading...</p>
         </div>
       </div>
     );
   }
 
-  if (!isAuth) {
+  // Handle unauthenticated state - middleware should redirect, but this is a fallback
+  if (status === "unauthenticated") {
+    router.push("/login");
     return null;
   }
+
+  const handleLogout = async () => {
+    await signOut({ callbackUrl: "/login" });
+  };
 
   return (
     <div className="min-h-screen bg-[#F5F5F5] bg-gradient-radial">

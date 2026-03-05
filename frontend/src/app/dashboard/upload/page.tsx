@@ -13,7 +13,7 @@ import {
   FileImage,
 } from "lucide-react";
 
-import { uploadApi } from "@/lib/api";
+import { uploadApi, type ApiError } from "@/lib/api";
 import { cn, formatFileSize, computeFileHash, formatRelativeTime } from "@/lib/utils";
 import type { UploadHistoryItem, UploadResult } from "@/types";
 
@@ -44,6 +44,16 @@ const statusLabels = {
   success: "Success",
   duplicated: "Duplicate",
   failed: "Failed",
+};
+
+const getUploadFailureMessage = (status?: number): string => {
+  if (status === 401 || status === 403) {
+    return "登录过期或无权限";
+  }
+  if (status === 422) {
+    return "上传参数错误/文件为空";
+  }
+  return "服务异常，请稍后重试";
 };
 
 export default function UploadPage() {
@@ -185,18 +195,22 @@ export default function UploadPage() {
   const uploadAllFiles = async () => {
     if (files.length === 0 || isUploading) return;
 
+    const toUpload = files.filter((f) => f.status === "pending");
+    if (toUpload.length === 0) return;
+
+    const toUploadIds = new Set(toUpload.map((f) => f.id));
+
     setIsUploading(true);
 
-    // Mark all as uploading
+    // Mark selected pending files as uploading
     setFiles((prev) =>
-      prev.map((f) => (f.status === "pending" ? { ...f, status: "uploading" as const } : f))
+      prev.map((f) => (toUploadIds.has(f.id) ? { ...f, status: "uploading" as const } : f))
     );
 
     try {
-      // Compute hashes for all files
-      const pendingFiles = files.filter((f) => f.status === "uploading");
+      // Compute hashes for selected files
       const hashes = await Promise.all(
-        pendingFiles.map(async (f) => ({
+        toUpload.map(async (f) => ({
           id: f.id,
           hash: await computeFileHash(f.file),
         }))
@@ -204,13 +218,13 @@ export default function UploadPage() {
 
       // Upload files
       const response = await uploadApi.uploadImages(
-        pendingFiles.map((f) => f.file),
+        toUpload.map((f) => f.file),
         hashes.map((h) => h.hash),
         (progress) => {
-          // Update progress for all files
+          // Update progress for selected files only
           setFiles((prev) =>
             prev.map((f) =>
-              f.status === "uploading" ? { ...f, progress } : f
+              toUploadIds.has(f.id) ? { ...f, progress } : f
             )
           );
         }
@@ -221,40 +235,40 @@ export default function UploadPage() {
 
       setFiles((prev) => {
         const updated = [...prev];
-        results.forEach((result) => {
-          const pendingFile = pendingFiles.find(
-            (f) => f.file.name === result.original_filename
-          );
-          if (pendingFile) {
-            const index = updated.findIndex((f) => f.id === pendingFile.id);
-            if (index !== -1) {
-              updated[index] = {
-                ...updated[index],
-                status: result.status,
-                progress: 100,
-                result,
-              };
+        results.forEach((result, index) => {
+          const targetFile = toUpload[index];
+          if (!targetFile) return;
 
-              // Save to history
-              saveToHistory(updated[index].file, result);
-            }
+          const fileIndex = updated.findIndex((f) => f.id === targetFile.id);
+          if (fileIndex !== -1) {
+            updated[fileIndex] = {
+              ...updated[fileIndex],
+              status: result.status,
+              progress: 100,
+              result,
+            };
+
+            // Save to history
+            saveToHistory(updated[fileIndex].file, result);
           }
         });
         return updated;
       });
     } catch (error) {
       console.error("Upload error:", error);
-      // Mark all uploading files as failed
+      const message = getUploadFailureMessage((error as ApiError | undefined)?.status);
+
+      // Mark selected files as failed
       setFiles((prev) =>
         prev.map((f) =>
-          f.status === "uploading"
+          toUploadIds.has(f.id)
             ? {
                 ...f,
                 status: "failed" as const,
                 result: {
                   status: "failed",
                   original_filename: f.file.name,
-                  error_message: "Upload failed. Please try again.",
+                  error_message: message,
                   is_duplicate: false,
                 },
               }

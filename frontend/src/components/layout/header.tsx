@@ -20,12 +20,6 @@ export function Header() {
           >
             Sign In
           </Link>
-          <Link
-            href="/register"
-            className="text-sm font-medium hover:text-primary"
-          >
-            Sign Up
-          </Link>
         </nav>
       </div>
     </header>

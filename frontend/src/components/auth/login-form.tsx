@@ -1,23 +1,22 @@
 /**
- * Login form component
+ * Login form component using NextAuth
  */
 "use client";
 
 import { useState } from "react";
+import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { authApi } from "@/lib/api";
-import { setTokens } from "@/lib/auth";
-import { useRouter } from "next/navigation";
-import type { TokenResponse } from "@/types";
 
 interface LoginFormProps {
   onSuccess?: () => void;
+  callbackUrl?: string;
 }
 
-export function LoginForm({ onSuccess }: LoginFormProps) {
+export function LoginForm({ onSuccess, callbackUrl = "/dashboard" }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,15 +29,21 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
     setError(null);
 
     try {
-      const response = await authApi.login(email, password);
-      const data = response.data as TokenResponse;
-      const { access_token, refresh_token } = data;
-      setTokens(access_token, refresh_token);
-      onSuccess?.();
-      router.push("/dashboard");
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      });
+
+      if (result?.error) {
+        setError("Invalid email or password");
+      } else {
+        onSuccess?.();
+        router.push(callbackUrl);
+      }
     } catch (err: unknown) {
-      const apiError = err as { detail?: string };
-      setError(apiError.detail || "Login failed");
+      const apiError = err as { message?: string };
+      setError(apiError.message || "Login failed");
     } finally {
       setIsLoading(false);
     }

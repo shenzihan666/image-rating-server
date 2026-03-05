@@ -6,6 +6,7 @@ import uuid
 from fastapi import UploadFile
 from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Type alias for Image model columns
@@ -137,10 +138,10 @@ class ImageUploadService:
                 content, original_filename
             )
 
-            # Extract image dimensions
-            width, height = self.storage.extract_image_dimensions(absolute_path)
+            # Extract image dimensions (async to avoid blocking event loop)
+            width, height = await self.storage.extract_image_dimensions(absolute_path)
 
-            # Create database record
+            # Create database record with nested transaction for race condition handling
             image_id = str(uuid.uuid4())
             image = Image(
                 id=image_id,
@@ -155,11 +156,45 @@ class ImageUploadService:
                 hash_sha256=computed_hash,
             )
 
-            db.add(image)
-            # Note: commit is handled by get_db dependency
+            # Use nested transaction (SAVEPOINT) to handle race condition
+            try:
+                async with db.begin_nested():
+                    db.add(image)
+                    await db.flush()
+                    logger.info(f"Image uploaded successfully: {image_id} - {original_filename}")
+            except IntegrityError:
+                # Race condition: another request inserted the same hash first
+                # The nested transaction is automatically rolled back
+                logger.info(f"Race condition detected for {original_filename}, hash already exists: {computed_hash}")
 
-            logger.info(f"Image uploaded successfully: {image_id} - {original_filename}")
+                # Re-query to get the existing image
+                existing_image = await self.check_duplicate(db, computed_hash)
+                if existing_image:
+                    return UploadResult(
+                        status=UploadStatus.DUPLICATED,
+                        original_filename=original_filename,
+                        metadata=ImageMetadata(
+                            image_id=existing_image.id,
+                            file_name=existing_image.title,
+                            file_size=existing_image.file_size,
+                            mime_type=existing_image.mime_type,
+                            width=existing_image.width,
+                            height=existing_image.height,
+                            file_path=existing_image.file_path,
+                            hash_sha256=existing_image.hash_sha256 or computed_hash,
+                        ),
+                        is_duplicate=True,
+                    )
+                else:
+                    # Should not happen, but handle gracefully
+                    return UploadResult(
+                        status=UploadStatus.FAILED,
+                        original_filename=original_filename,
+                        error_message=f"IntegrityError but no duplicate found for hash {computed_hash}",
+                        is_duplicate=False,
+                    )
 
+            # If we get here without exception, the insert was successful
             return UploadResult(
                 status=UploadStatus.SUCCESS,
                 original_filename=original_filename,

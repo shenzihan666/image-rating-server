@@ -11,7 +11,7 @@ from app.services.ai.registry import AIModelRegistry
 
 async def ensure_ai_models(db: AsyncSession) -> None:
     """Ensure built-in models exist in the database."""
-    specs = AIModelRegistry.list_models()
+    specs = await AIModelRegistry.list_models()
     for spec in specs:
         result = await db.execute(select(AIModel).where(AIModel.name == spec["name"]))
         existing = result.scalar_one_or_none()
@@ -35,7 +35,7 @@ async def list_models(db: AsyncSession) -> list[dict]:
     models = result.scalars().all()
     items: list[dict] = []
     for model in models:
-        reg = AIModelRegistry.get_model(model.name)
+        reg = await AIModelRegistry.get_model(model.name)
         items.append(
             {
                 "name": model.name,
@@ -63,7 +63,7 @@ async def set_active_model(db: AsyncSession, name: str) -> str:
     if record is None:
         return "not_found"
 
-    if AIModelRegistry.get_model(name) is None:
+    if await AIModelRegistry.get_model(name) is None:
         return "not_found"
 
     success = await AIModelRegistry.set_active(name)
@@ -90,7 +90,7 @@ async def restore_active_model(db: AsyncSession) -> None:
     if active is None:
         return
 
-    if AIModelRegistry.get_model(active.name) is None:
+    if await AIModelRegistry.get_model(active.name) is None:
         await db.execute(
             update(AIModel).where(AIModel.name == active.name).values(is_active=False)
         )

@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await init_db()
         logger.info("Database initialized successfully")
 
-        register_builtin_models()
+        await register_builtin_models()
         from app.core.database import async_session_maker
         async with async_session_maker() as session:
             await ensure_ai_models(session)

@@ -8,7 +8,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from app.api.deps import CurrentUser, get_db
 from app.core.database import AsyncSession
-from app.schemas.user import UserCreate, UserResponse
+from app.schemas.token import TokenResponse
 from app.services.auth import AuthService
 
 router = APIRouter()
@@ -21,23 +21,6 @@ class LoginRequest(BaseModel):
 
     email: EmailStr
     password: str = Field(..., min_length=6)
-
-
-class RegisterRequest(BaseModel):
-    """Registration request schema."""
-
-    email: EmailStr
-    password: str = Field(..., min_length=6, max_length=100)
-    full_name: str = Field(..., min_length=1, max_length=100)
-
-
-class TokenResponse(BaseModel):
-    """Token response schema."""
-
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
 
 
 class RefreshTokenRequest(BaseModel):
@@ -84,40 +67,6 @@ async def login(
 
     # Create tokens
     return await service.create_tokens(user)
-
-
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(
-    request: RegisterRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> UserResponse:
-    """
-    Register a new user account.
-
-    Args:
-        request: Registration data
-        db: Database session
-
-    Returns:
-        UserResponse with created user data
-
-    Raises:
-        HTTPException: If email already exists
-    """
-    service = AuthService(db)
-
-    try:
-        user_create = UserCreate(
-            email=request.email,
-            password=request.password,
-            full_name=request.full_name,
-        )
-        return await service.register(user_create)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
 
 
 @router.post("/refresh", response_model=TokenResponse, status_code=status.HTTP_200_OK)
@@ -183,38 +132,3 @@ async def logout(current_user: CurrentUser) -> None:
     # TODO: Implement token blacklisting if needed
     # For now, this is a stateless operation
     pass
-
-
-@router.get("/me", response_model=UserResponse, status_code=status.HTTP_200_OK)
-async def get_current_user_info(
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> UserResponse:
-    """
-    Get information about the currently authenticated user.
-
-    Args:
-        current_user: Current authenticated user from token
-        db: Database session
-
-    Returns:
-        UserResponse with current user data
-    """
-    from app.services.user import UserService
-
-    user_service = UserService(db)
-    user = await user_service.get_by_id(current_user["user_id"])
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-
-    return UserResponse(
-        user_id=user.id,
-        email=user.email,
-        full_name=user.full_name,
-        is_active=user.is_active,
-        created_at=user.created_at.isoformat() if user.created_at else None,
-    )

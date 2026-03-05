@@ -1,6 +1,7 @@
 """
 File storage service with atomic write and hash computation
 """
+import asyncio
 import hashlib
 import shutil
 import uuid
@@ -12,6 +13,38 @@ from loguru import logger
 from PIL import Image as PILImage
 
 from app.core.config import settings
+
+
+def _sync_extract_image_dimensions(file_path: Path) -> tuple[int | None, int | None]:
+    """
+    Synchronously extract image dimensions using PIL.
+
+    This is a blocking operation and should be run in a thread pool.
+
+    Args:
+        file_path: Path to image file
+
+    Returns:
+        Tuple of (width, height) or (None, None) if extraction fails
+    """
+    try:
+        with PILImage.open(file_path) as img:
+            return img.size[0], img.size[1]
+    except Exception:
+        return None, None
+
+
+def _sync_move_file(src: Path, dst: Path) -> None:
+    """
+    Synchronously move a file.
+
+    This is a blocking operation and should be run in a thread pool.
+
+    Args:
+        src: Source file path
+        dst: Destination file path
+    """
+    shutil.move(str(src), str(dst))
 
 
 class FileStorageService:
@@ -84,8 +117,8 @@ class FileStorageService:
             async with aiofiles.open(temp_path, "wb") as f:
                 await f.write(file_content)
 
-            # Atomic move
-            shutil.move(str(temp_path), str(absolute_path))
+            # Atomic move (async to avoid blocking event loop)
+            await asyncio.to_thread(_sync_move_file, temp_path, absolute_path)
             logger.debug(f"File saved atomically: {absolute_path}")
 
             return absolute_path, str(relative_path).replace("\\", "/")
@@ -96,9 +129,12 @@ class FileStorageService:
             logger.error(f"Failed to save file: {e}")
             raise
 
-    def extract_image_dimensions(self, file_path: Path) -> tuple[int | None, int | None]:
+    async def extract_image_dimensions(self, file_path: Path) -> tuple[int | None, int | None]:
         """
         Extract image dimensions using PIL.
+
+        This method runs the PIL operation in a thread pool to avoid
+        blocking the asyncio event loop.
 
         Args:
             file_path: Path to image file
@@ -107,8 +143,13 @@ class FileStorageService:
             Tuple of (width, height) or (None, None) if extraction fails
         """
         try:
-            with PILImage.open(file_path) as img:
-                return img.size[0], img.size[1]
+            # PIL operations are synchronous, run in thread pool
+            width, height = await asyncio.to_thread(
+                _sync_extract_image_dimensions, file_path
+            )
+            if width is None or height is None:
+                logger.warning(f"Failed to extract image dimensions for: {file_path}")
+            return width, height
         except Exception as e:
             logger.warning(f"Failed to extract image dimensions: {e}")
             return None, None
