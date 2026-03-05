@@ -91,7 +91,7 @@ class ConcurrentUploadService:
     async def process_batch_upload(
         self,
         db: AsyncSession,
-        files: list[UploadFile],
+        files: list[UploadFile] | None,
         hashes_json: str | None,
         user_id: str,
     ) -> UploadResponse:
@@ -100,13 +100,25 @@ class ConcurrentUploadService:
 
         Args:
             db: Database session
-            files: List of UploadFile objects
+            files: List of UploadFile objects (None or empty allowed)
             hashes_json: JSON string of hashes array
             user_id: User ID
 
         Returns:
             UploadResponse with batch results
         """
+        # Handle None or empty files
+        if not files:
+            return UploadResponse(
+                success=True,
+                total=0,
+                succeeded=0,
+                duplicated=0,
+                failed=0,
+                results=[],
+                message="No files uploaded",
+            )
+
         # Validate file count
         if len(files) > settings.UPLOAD_MAX_FILES_PER_REQUEST:
             return UploadResponse(
@@ -117,17 +129,6 @@ class ConcurrentUploadService:
                 failed=len(files),
                 results=[],
                 message=f"Too many files: {len(files)} > {settings.UPLOAD_MAX_FILES_PER_REQUEST}",
-            )
-
-        if not files:
-            return UploadResponse(
-                success=True,
-                total=0,
-                succeeded=0,
-                duplicated=0,
-                failed=0,
-                results=[],
-                message="No files uploaded",
             )
 
         # Parse hashes

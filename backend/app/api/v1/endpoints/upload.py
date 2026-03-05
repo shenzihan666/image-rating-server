@@ -20,7 +20,7 @@ router = APIRouter()
 async def upload_images(
     current_user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    images: Annotated[list[UploadFile], File(description="Image files to upload")],
+    images: Annotated[list[UploadFile] | None, File(description="Image files to upload")] = None,
     hashes: Annotated[str | None, Form(description="JSON array of SHA256 hashes")] = None,
     upload_service: ConcurrentUploadService = Depends(get_concurrent_upload_service),
 ) -> UploadResponse:
