@@ -51,6 +51,9 @@ scripts\dev.bat
 - `app/schemas/` - Pydantic request/response schemas
 - `app/services/` - Business logic layer
   - `services/auth.py` - Authentication service
+  - `services/storage.py` - File storage with atomic write and hash computation
+  - `services/image_upload.py` - Image upload validation and deduplication
+  - `services/concurrent_upload.py` - Concurrent upload control (max 3 parallel)
   - `services/ai/` - AI model registry and analyzers
     - `registry.py` - Model registration and active model management
     - `store.py` - Database persistence for model state
@@ -68,6 +71,7 @@ scripts\dev.bat
 ### API Endpoints
 - `/api/v1/auth/*` - Authentication (login, register, refresh, logout)
 - `/api/v1/users/*` - User management
+- `/api/v1/upload` - Image upload with hash verification and deduplication
 - `/api/v1/ai/models/*` - AI model management (list, activate, deactivate)
 
 ### Key Patterns

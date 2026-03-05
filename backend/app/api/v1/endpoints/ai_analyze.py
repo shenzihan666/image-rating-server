@@ -1,13 +1,10 @@
 """
 AI Analyze endpoints - Manage AI analysis models
 """
-from typing import Any
-
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db

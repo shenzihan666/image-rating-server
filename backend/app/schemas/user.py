@@ -1,8 +1,6 @@
 """
 User schemas for request/response validation
 """
-from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -23,8 +21,8 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     """User update schema."""
 
-    full_name: Optional[str] = Field(None, min_length=1, max_length=100)
-    email: Optional[EmailStr] = None
+    full_name: str | None = Field(None, min_length=1, max_length=100)
+    email: EmailStr | None = None
 
 
 class UserResponse(BaseModel):
@@ -34,7 +32,7 @@ class UserResponse(BaseModel):
     email: EmailStr = Field(..., description="User email")
     full_name: str = Field(..., description="User full name")
     is_active: bool = Field(True, description="Whether user is active")
-    created_at: Optional[str] = Field(None, description="Account creation timestamp")
+    created_at: str | None = Field(None, description="Account creation timestamp")
 
     class Config:
         """Pydantic config."""

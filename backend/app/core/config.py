@@ -3,7 +3,6 @@ Application Configuration using Pydantic Settings
 """
 from functools import lru_cache
 from pathlib import Path
-from typing import List
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,7 +39,7 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = f"{FRONTEND_URL},http://localhost:3000"
 
     @property
-    def ALLOWED_ORIGINS_LIST(self) -> List[str]:
+    def allowed_origins_list(self) -> list[str]:
         """Parse ALLOWED_ORIGINS into a list."""
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
@@ -51,6 +50,17 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE_PATH: str = "logs/app.log"
+
+    # Upload Settings
+    UPLOAD_DIR: str = "uploads"
+    UPLOAD_MAX_FILE_SIZE: int = 52428800  # 50MB
+    UPLOAD_MAX_FILES_PER_REQUEST: int = 10
+    UPLOAD_ALLOWED_EXTENSIONS: str = "jpg,jpeg,png,gif,webp,bmp"
+
+    @property
+    def upload_allowed_extensions_set(self) -> set[str]:
+        """Parse allowed extensions into a set."""
+        return {ext.strip().lower() for ext in self.UPLOAD_ALLOWED_EXTENSIONS.split(",")}
 
     @field_validator("LOG_LEVEL")
     @classmethod
@@ -69,7 +79,7 @@ class Settings(BaseSettings):
         return path
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()

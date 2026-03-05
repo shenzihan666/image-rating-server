@@ -26,6 +26,7 @@ dependencies = [
     "pillow>=10.0.0",
     "opencv-python>=4.8.0",
     "numpy>=1.24.0",
+    "aiofiles>=24.1.0",
 ]
 
 [dependency-groups]
@@ -36,6 +37,7 @@ dev = [
     "black>=24.0.0",
     "ruff>=0.8.0",
     "mypy>=1.9.0",
+    "types-aiofiles>=25.1.0.20251011",
 ]
 
 [build-system]

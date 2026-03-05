@@ -1,7 +1,6 @@
 """
 Pydantic schemas for AI analyze API
 """
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,5 +24,5 @@ class AnalysisResult(BaseModel):
     """Schema for image analysis result."""
 
     model: str = Field(..., description="Name of the model used")
-    score: Optional[float] = Field(None, description="Overall score if applicable")
+    score: float | None = Field(None, description="Overall score if applicable")
     details: dict = Field(default_factory=dict, description="Detailed analysis results")

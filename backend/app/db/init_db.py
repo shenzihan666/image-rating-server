@@ -3,12 +3,12 @@ Database initialization script
 Run this to create all tables and seed initial data
 """
 import asyncio
-from pathlib import Path
 
-from app.core.database import init_db, close_db
-from app.models.user import User
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.core.database import close_db, init_db
 from app.core.security import hash_password
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from app.models.user import User
 
 
 async def create_tables():
@@ -21,6 +21,7 @@ async def create_tables():
 async def seed_test_user() -> None:
     """Create a test user for development."""
     from sqlalchemy import select
+
     from app.core.database import engine
 
     print("Checking for test user...")

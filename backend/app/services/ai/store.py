@@ -1,7 +1,6 @@
 """
 Database-backed AI model state
 """
-from typing import Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,9 +47,9 @@ async def list_models(db: AsyncSession) -> list[dict]:
     return items
 
 
-async def get_active_model(db: AsyncSession) -> Optional[AIModel]:
+async def get_active_model(db: AsyncSession) -> AIModel | None:
     """Get the active model record from the database."""
-    result = await db.execute(select(AIModel).where(AIModel.is_active == True))
+    result = await db.execute(select(AIModel).where(AIModel.is_active))
     return result.scalar_one_or_none()
 
 

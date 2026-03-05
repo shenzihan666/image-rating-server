@@ -1,7 +1,6 @@
 """
 Authentication service - Business logic for user authentication with database
 """
-from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -66,7 +65,7 @@ class AuthService:
             created_at=new_user.created_at.isoformat() if new_user.created_at else None,
         )
 
-    async def authenticate(self, email: str, password: str) -> Optional[User]:
+    async def authenticate(self, email: str, password: str) -> User | None:
         """
         Authenticate user with email and password.
 
@@ -87,7 +86,7 @@ class AuthService:
 
         return None
 
-    async def get_user_by_id(self, user_id: str) -> Optional[User]:
+    async def get_user_by_id(self, user_id: str) -> User | None:
         """
         Get user by ID.
 

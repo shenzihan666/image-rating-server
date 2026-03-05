@@ -1,7 +1,6 @@
 """
 User service - Business logic for user management with database
 """
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +16,7 @@ class UserService:
         """Initialize user service with database session."""
         self.db = db
 
-    async def get_by_id(self, user_id: str) -> Optional[User]:
+    async def get_by_id(self, user_id: str) -> User | None:
         """
         Get user by ID.
 
@@ -32,7 +31,7 @@ class UserService:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_email(self, email: str) -> Optional[User]:
+    async def get_by_email(self, email: str) -> User | None:
         """
         Get user by email.
 
@@ -47,7 +46,7 @@ class UserService:
         )
         return result.scalar_one_or_none()
 
-    async def update(self, user_id: str, update_data: UserUpdate) -> Optional[UserResponse]:
+    async def update(self, user_id: str, update_data: UserUpdate) -> UserResponse | None:
         """
         Update user information.
 

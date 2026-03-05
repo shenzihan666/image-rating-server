@@ -5,11 +5,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, relationship
 
 if TYPE_CHECKING:
-    from .image import Image
-    from .user import User
+    pass
 
 from app.core.database import Base
 

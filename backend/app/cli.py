@@ -2,6 +2,7 @@
 CLI commands for database management
 """
 import asyncio
+
 import click
 
 
@@ -14,7 +15,6 @@ def cli():
 @cli.command()
 def init():
     """Initialize database with tables and seed data."""
-    import asyncio
     from app.db.init_db import main
 
     asyncio.run(main())
@@ -23,13 +23,14 @@ def init():
 @cli.command()
 def create_user():
     """Create a new user interactively."""
-    import asyncio
     import getpass
+    from uuid import uuid4
+
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
     from app.core.database import engine
     from app.core.security import hash_password
     from app.models.user import User
-    from uuid import uuid4
 
     email = input("Email: ")
     full_name = input("Full Name: ")
@@ -73,12 +74,13 @@ def create_user():
 @click.option("--email", prompt=True, help="User email")
 def reset_password(email: str):
     """Reset user password."""
-    import asyncio
     import getpass
+
+    from sqlalchemy import select
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
     from app.core.database import engine
     from app.core.security import hash_password
-    from sqlalchemy import select
     from app.models.user import User
 
     password = getpass.getpass("New Password: ")

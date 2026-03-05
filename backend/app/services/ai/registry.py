@@ -1,7 +1,6 @@
 """
 AI Model Registry - Manages available models and active model state
 """
-from typing import Optional
 
 from loguru import logger
 
@@ -12,7 +11,7 @@ class AIModelRegistry:
     """Registry for managing AI models with single active model support."""
 
     _models: dict[str, BaseAIAnalyzer] = {}
-    _active_model: Optional[str] = None
+    _active_model: str | None = None
 
     @classmethod
     def register(cls, model: BaseAIAnalyzer) -> None:
@@ -90,7 +89,7 @@ class AIModelRegistry:
         return True
 
     @classmethod
-    def get_active(cls) -> Optional[BaseAIAnalyzer]:
+    def get_active(cls) -> BaseAIAnalyzer | None:
         """
         Get the currently active model.
 
@@ -102,7 +101,7 @@ class AIModelRegistry:
         return None
 
     @classmethod
-    def get_active_name(cls) -> Optional[str]:
+    def get_active_name(cls) -> str | None:
         """
         Get the name of the currently active model.
 
@@ -130,7 +129,7 @@ class AIModelRegistry:
         ]
 
     @classmethod
-    def get_model(cls, name: str) -> Optional[BaseAIAnalyzer]:
+    def get_model(cls, name: str) -> BaseAIAnalyzer | None:
         """
         Get a specific model by name.
 

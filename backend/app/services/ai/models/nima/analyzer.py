@@ -4,8 +4,6 @@ NIMA Analyzer implementation
 from pathlib import Path
 from typing import Any
 
-import cv2
-import numpy as np
 import torch
 from loguru import logger
 from PIL import Image

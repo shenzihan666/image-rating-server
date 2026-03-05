@@ -2,7 +2,7 @@
 Security utilities for authentication and authorization
 """
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 import bcrypt
 from jose import ExpiredSignatureError, JWTError, jwt
@@ -51,7 +51,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(
     data: dict[str, Any],
-    expires_delta: Optional[timedelta] = None,
+    expires_delta: timedelta | None = None,
 ) -> str:
     """
     Create a JWT access token.
@@ -79,7 +79,7 @@ def create_access_token(
 
 def create_refresh_token(
     data: dict[str, Any],
-    expires_delta: Optional[timedelta] = None,
+    expires_delta: timedelta | None = None,
 ) -> str:
     """
     Create a JWT refresh token.
@@ -105,7 +105,7 @@ def create_refresh_token(
     return encoded_jwt
 
 
-def verify_token(token: str, token_type: str = "access") -> Optional[dict[str, Any]]:
+def verify_token(token: str, token_type: str = "access") -> dict[str, Any] | None:
     """
     Verify and decode a JWT token.
 

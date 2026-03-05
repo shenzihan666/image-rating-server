@@ -136,6 +136,7 @@ async def change_password(
         HTTPException: If old password is incorrect
     """
     from sqlalchemy import select
+
     from app.models.user import User
 
     # Get user with password
@@ -188,7 +189,8 @@ async def list_users(
         UserListResponse with paginated user list
     """
     # TODO: Check if user is admin
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
+
     from app.models.user import User
 
     # Get total count

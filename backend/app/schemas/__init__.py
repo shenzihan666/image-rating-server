@@ -1,6 +1,12 @@
 """Pydantic schemas for request/response validation."""
 
-from app.schemas.token import TokenResponse, TokenPayload
+from app.schemas.token import TokenPayload, TokenResponse
+from app.schemas.upload import (
+    ImageMetadata,
+    UploadResponse,
+    UploadResult,
+    UploadStatus,
+)
 from app.schemas.user import (
     UserCreate,
     UserResponse,
@@ -13,4 +19,8 @@ __all__ = [
     "UserCreate",
     "UserResponse",
     "UserUpdate",
+    "ImageMetadata",
+    "UploadResponse",
+    "UploadResult",
+    "UploadStatus",
 ]

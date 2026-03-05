@@ -1,11 +1,10 @@
 """
 Dependency injection for API endpoints
 """
-from typing import Annotated, Optional
+from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from loguru import logger
 
 from app.core.database import get_db
 from app.core.security import verify_token
@@ -50,7 +49,7 @@ async def get_current_user(
         )
 
     # Extract user information from token
-    user_id: Optional[str] = payload.get("sub")
+    user_id: str | None = payload.get("sub")
     if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -67,7 +66,7 @@ async def get_current_user(
 
 async def get_optional_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-) -> Optional[dict]:
+) -> dict | None:
     """
     Get the current user if authenticated, otherwise return None.
 
@@ -88,7 +87,7 @@ async def get_optional_user(
     if payload is None:
         return None
 
-    user_id: Optional[str] = payload.get("sub")
+    user_id: str | None = payload.get("sub")
     if user_id is None:
         return None
 
@@ -124,5 +123,5 @@ async def require_active_user(
 
 # Type aliases for cleaner dependency injection
 CurrentUser = Annotated[dict, Depends(get_current_user)]
-OptionalUser = Annotated[Optional[dict], Depends(get_optional_user)]
+OptionalUser = Annotated[dict | None, Depends(get_optional_user)]
 ActiveUser = Annotated[dict, Depends(require_active_user)]
