@@ -16,11 +16,13 @@ import {
   X,
   Bot,
   Loader2,
+  Image as ImageIcon,
 } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/upload", label: "Upload", icon: Upload },
+  { href: "/dashboard/images", label: "Images", icon: ImageIcon },
   { href: "/dashboard/ai-analyze", label: "AI Analyze Server", icon: Bot },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];

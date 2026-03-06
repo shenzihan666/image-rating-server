@@ -5,7 +5,7 @@
 import type { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios, { AxiosInstance } from "axios";
 
-import type { UploadResponse, TokenResponse, User } from "@/types";
+import type { UploadResponse, TokenResponse, User, Image, PaginatedResponse, BatchAnalyzeResponse, BatchDeleteResponse } from "@/types";
 
 // API base URL from environment variable
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -189,6 +189,9 @@ export const aiAnalyzeApi = {
   getActiveModel: () => api.get<AIModel | null>("/ai/models/active"),
 
   deactivateActiveModel: () => api.delete("/ai/models/active"),
+
+  analyzeImage: (imageId: string, forceNew: boolean = false) =>
+    api.post("/ai/analyze/" + imageId, { force_new: forceNew }),
 };
 
 /**
@@ -230,4 +233,40 @@ export const uploadApi = {
       },
     });
   },
+};
+
+/**
+ * Images API
+ */
+export const imageApi = {
+  getImages: (params?: {
+    page?: number;
+    page_size?: number;
+    search?: string;
+    date_from?: string;
+    date_to?: string;
+  }) => api.get<PaginatedResponse<Image>>("/images", { params }),
+
+  getImage: (id: string) => api.get<Image>(`/images/${id}`),
+
+  updateImage: (id: string, data: {
+    title?: string;
+    description?: string;
+  }) => api.patch<Image>(`/images/${id}`, data),
+
+  deleteImage: (id: string) => api.delete(`/images/${id}`),
+
+  batchDelete: (imageIds: string[]) =>
+    api.post<BatchDeleteResponse>("/images/batch/delete", { image_ids: imageIds }),
+};
+
+/**
+ * Batch AI Analyze API
+ */
+export const batchAnalyzeApi = {
+  batchAnalyze: (imageIds: string[], forceNew?: boolean) =>
+    api.post<BatchAnalyzeResponse>("/ai/analyze/batch", {
+      image_ids: imageIds,
+      force_new: forceNew ?? false,
+    }),
 };

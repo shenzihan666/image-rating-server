@@ -62,6 +62,9 @@ export interface Image {
   rating_count: number;
   created_at: string;
   updated_at: string;
+  ai_score?: number | null;
+  ai_model?: string | null;
+  ai_analyzed_at?: string | null;
 }
 
 /**
@@ -144,4 +147,33 @@ export interface UploadHistoryItem {
   status: "pending" | "uploading" | "success" | "duplicated" | "failed";
   progress: number;
   result?: UploadResult;
+}
+
+/**
+ * Batch operation types
+ */
+export interface ImageAnalyzeResponse {
+  image_id: string;
+  model: string;
+  score: number | null;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface BatchAnalyzeResponse {
+  success: boolean;
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: ImageAnalyzeResponse[];
+  message: string;
+}
+
+export interface BatchDeleteResponse {
+  success: boolean;
+  total: number;
+  deleted: number;
+  failed: number;
+  errors: string[];
+  message: string;
 }

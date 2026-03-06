@@ -1,20 +1,32 @@
 """
-AI Analyze endpoints - Manage AI analysis models
+AI Analyze endpoints - Manage AI analysis models and analyze images
 """
+import json
+from datetime import datetime
+from pathlib import Path
+from collections.abc import AsyncGenerator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from app.api.deps import get_db
+from app.api.deps import ActiveUser, get_db
+from app.core.config import settings
+from app.schemas.analyze import ImageAnalyzeRequest, ImageAnalyzeResponse
+from app.schemas.batch import BatchAnalyzeRequest, BatchAnalyzeResponse
 from app.services.ai import AIModelInfo, SetActiveModelRequest
+from app.services.ai.registry import AIModelRegistry
 from app.services.ai.store import (
     deactivate_model,
     get_active_model,
     list_models,
     set_active_model,
 )
+from app.models.image import Image
+from app.services.analysis_result import AnalysisResultService
+from app.services.concurrent_analyze import get_concurrent_analyze_service
 
 router = APIRouter()
 
@@ -107,3 +119,142 @@ async def deactivate_model_endpoint(
         await deactivate_model(db)
         return {"message": f"Model '{active_model.name}' deactivated successfully"}
     return {"message": "No active model to deactivate"}
+
+
+@router.post("/analyze/batch", response_model=BatchAnalyzeResponse)
+async def batch_analyze(
+    request: BatchAnalyzeRequest,
+    current_user: ActiveUser = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+) -> BatchAnalyzeResponse:
+    """
+    Analyze multiple images in batch using the active AI model.
+
+    Args:
+        request: Batch analysis request with image IDs
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        BatchAnalyzeResponse with batch analysis results
+
+    Raises:
+        HTTPException: If no active model
+    """
+    # Verify active model exists
+    model = await AIModelRegistry.get_active()
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active AI model. Please activate a model first.",
+        )
+
+    # Create session factory for concurrent tasks
+    async def session_factory() -> AsyncGenerator[AsyncSession, None]:
+        async for session in get_db():
+            yield session
+
+    # Process batch analysis
+    service = get_concurrent_analyze_service()
+    return await service.process_batch_analyze(
+        session_factory=session_factory,
+        image_ids=request.image_ids,
+        force_new=request.force_new,
+    )
+
+
+@router.post("/analyze/{image_id}", response_model=ImageAnalyzeResponse)
+async def analyze_image(
+    image_id: str,
+    request: ImageAnalyzeRequest = ImageAnalyzeRequest(),
+    current_user: ActiveUser = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+) -> ImageAnalyzeResponse:
+    """
+    Analyze an image using the active AI model.
+
+    Args:
+        image_id: ID of the image to analyze
+        request: Analysis request options
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        ImageAnalyzeResponse with analysis results
+
+    Raises:
+        HTTPException: If no active model, image not found, or analysis fails
+    """
+    import json
+
+    # Verify user owns the image
+    result = await db.execute(
+        select(Image).where(Image.id == image_id)
+    )
+    image = result.scalar_one_or_none()
+
+    if not image:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Image not found",
+        )
+
+    # Get active model
+    model = await AIModelRegistry.get_active()
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active AI model. Please activate a model first.",
+        )
+
+    # Check for cached result if not forcing new analysis
+    analysis_service = AnalysisResultService(db)
+    if not request.force_new:
+        cached = await analysis_service.get_latest(image_id, model.name)
+        if cached:
+            logger.info(f"Using cached analysis for image {image_id}")
+            return ImageAnalyzeResponse(
+                image_id=image_id,
+                model=model.name,
+                score=cached.score,
+                details=json.loads(cached.details) if cached.details else {},
+                created_at=cached.created_at.isoformat(),
+            )
+
+    # Get full image path
+    image_path = Path(settings.UPLOAD_DIR) / image.file_path
+    if not image_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Image file not found",
+        )
+
+    # Analyze the image
+    try:
+        logger.info(f"Analyzing image {image_id} with model {model.name}")
+        analysis_result = await model.analyze(str(image_path))
+
+        # Save result to database
+        distribution = analysis_result.get("distribution")
+        details = {k: v for k, v in analysis_result.items() if k != "distribution"}
+        await analysis_service.save_result(
+            image_id,
+            model.name,
+            analysis_result.get("score"),
+            distribution,
+            details,
+        )
+
+        return ImageAnalyzeResponse(
+            image_id=image_id,
+            model=model.name,
+            score=analysis_result.get("score"),
+            details=analysis_result,
+            created_at=datetime.utcnow().isoformat(),
+        )
+    except Exception as e:
+        logger.error(f"Analysis failed for image {image_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Analysis failed: {str(e)}",
+        )

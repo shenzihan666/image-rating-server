@@ -9,6 +9,7 @@ from pydantic import BaseModel, EmailStr, Field
 from app.api.deps import CurrentUser, get_db
 from app.core.database import AsyncSession
 from app.schemas.token import TokenResponse
+from app.schemas.user import UserResponse
 from app.services.auth import AuthService
 
 router = APIRouter()
@@ -132,3 +133,36 @@ async def logout(current_user: CurrentUser) -> None:
     # TODO: Implement token blacklisting if needed
     # For now, this is a stateless operation
     pass
+
+
+@router.get("/me", response_model=UserResponse, status_code=status.HTTP_200_OK)
+async def get_current_user_profile(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserResponse:
+    """
+    Get the current authenticated user's profile.
+
+    Args:
+        current_user: Current authenticated user from access token
+        db: Database session
+
+    Returns:
+        UserResponse with the authenticated user's data
+    """
+    service = AuthService(db)
+    user = await service.get_user_by_id(current_user["user_id"])
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    return UserResponse(
+        user_id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        is_active=user.is_active,
+        created_at=user.created_at.isoformat() if user.created_at else None,
+    )

@@ -79,11 +79,38 @@ async def _apply_schema_migrations(conn: AsyncConnection) -> None:
     except SQLAlchemyError as e:
         logger.warning(f"Could not create unique index ix_images_hash_sha256: {e}")
 
+    # Create analysis_results table if not exists (for AI analysis persistence)
+    has_analysis_table = await _has_table(conn, "analysis_results")
+    if not has_analysis_table:
+        await conn.exec_driver_sql("""
+            CREATE TABLE analysis_results (
+                id VARCHAR(36) PRIMARY KEY,
+                image_id VARCHAR(36) NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+                model VARCHAR(100) NOT NULL,
+                score FLOAT,
+                min_score FLOAT,
+                max_score FLOAT,
+                distribution TEXT,
+                details TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.exec_driver_sql("CREATE INDEX ix_analysis_results_image_id ON analysis_results (image_id)")
+        await conn.exec_driver_sql("CREATE INDEX ix_analysis_results_model ON analysis_results (model)")
+        await conn.exec_driver_sql("CREATE INDEX ix_analysis_results_created_at ON analysis_results (created_at)")
+        logger.info("Applied schema migration: created analysis_results table")
+
 
 async def _has_column(conn: AsyncConnection, table_name: str, column_name: str) -> bool:
     """Check whether a table contains a specific column."""
     result = await conn.exec_driver_sql(f'PRAGMA table_info("{table_name}")')
     return any(row[1] == column_name for row in result.fetchall())
+
+
+async def _has_table(conn: AsyncConnection, table_name: str) -> bool:
+    """Check whether a table exists in the database."""
+    result = await conn.exec_driver_sql(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+    return result.fetchone() is not None
 
 
 async def close_db() -> None:
