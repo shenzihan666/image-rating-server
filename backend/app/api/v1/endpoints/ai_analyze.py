@@ -2,29 +2,36 @@
 AI Analyze endpoints - Manage AI analysis models and analyze images
 """
 import json
+from collections.abc import AsyncGenerator
 from datetime import datetime
 from pathlib import Path
-from collections.abc import AsyncGenerator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import ActiveUser, get_db
 from app.core.config import settings
+from app.models.image import Image
 from app.schemas.analyze import ImageAnalyzeRequest, ImageAnalyzeResponse
 from app.schemas.batch import BatchAnalyzeRequest, BatchAnalyzeResponse
-from app.services.ai import AIModelInfo, SetActiveModelRequest
+from app.services.ai import (
+    AIModelDetail,
+    AIModelInfo,
+    SetActiveModelRequest,
+    UpdateAIModelConfigRequest,
+)
 from app.services.ai.registry import AIModelRegistry
 from app.services.ai.store import (
     deactivate_model,
     get_active_model,
+    get_model_detail,
     list_models,
     set_active_model,
+    update_model_config,
 )
-from app.models.image import Image
 from app.services.analysis_result import AnalysisResultService
 from app.services.concurrent_analyze import get_concurrent_analyze_service
 
@@ -63,12 +70,18 @@ async def set_active_model_endpoint(
         HTTPException: If model not found or failed to activate
     """
     result = await set_active_model(db, request.model_name)
-    if result == "not_found":
+    if result["status"] == "not_found":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model not found: {request.model_name}",
         )
-    if result != "ok":
+    if result["status"] == "not_configured":
+        missing_fields = ", ".join(result.get("missing_fields", []))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Model '{request.model_name}' is not configured: {missing_fields}",
+        )
+    if result["status"] != "ok":
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to activate model: {request.model_name}",
@@ -102,6 +115,37 @@ async def get_active_model_endpoint(
             return AIModelInfo(**item)
 
     return None
+
+
+@router.get("/models/{model_name}", response_model=AIModelDetail)
+async def get_model_detail_endpoint(
+    model_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AIModelDetail:
+    """Get detailed information for a specific AI model."""
+    model = await get_model_detail(db, model_name)
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model not found: {model_name}",
+        )
+    return AIModelDetail(**model)
+
+
+@router.put("/models/{model_name}/config", response_model=AIModelDetail)
+async def update_model_config_endpoint(
+    model_name: str,
+    request: UpdateAIModelConfigRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AIModelDetail:
+    """Persist configuration for a model and sync it to runtime state."""
+    model = await update_model_config(db, model_name, request.config)
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model not found: {model_name}",
+        )
+    return AIModelDetail(**model)
 
 
 @router.delete("/models/active", status_code=status.HTTP_200_OK)
@@ -185,7 +229,6 @@ async def analyze_image(
     Raises:
         HTTPException: If no active model, image not found, or analysis fails
     """
-    import json
 
     # Verify user owns the image
     result = await db.execute(
@@ -213,11 +256,18 @@ async def analyze_image(
         cached = await analysis_service.get_latest(image_id, model.name)
         if cached:
             logger.info(f"Using cached analysis for image {image_id}")
+            cached_details = json.loads(cached.details) if cached.details else {}
+            if cached.prompt_version_id and "prompt" not in cached_details:
+                cached_details["prompt"] = {
+                    "prompt_version_id": cached.prompt_version_id,
+                    "prompt_name": cached.prompt_name,
+                    "prompt_version_number": cached.prompt_version_number,
+                }
             return ImageAnalyzeResponse(
                 image_id=image_id,
                 model=model.name,
                 score=cached.score,
-                details=json.loads(cached.details) if cached.details else {},
+                details=cached_details,
                 created_at=cached.created_at.isoformat(),
             )
 
@@ -237,12 +287,25 @@ async def analyze_image(
         # Save result to database
         distribution = analysis_result.get("distribution")
         details = {k: v for k, v in analysis_result.items() if k != "distribution"}
+        prompt_meta = analysis_result.get("prompt")
+        prompt_version_id = None
+        prompt_name = None
+        prompt_version_number = None
+        if isinstance(prompt_meta, dict):
+            prompt_version_id = prompt_meta.get("prompt_version_id")
+            prompt_name = prompt_meta.get("prompt_name")
+            raw_version_number = prompt_meta.get("prompt_version_number")
+            if isinstance(raw_version_number, int):
+                prompt_version_number = raw_version_number
         await analysis_service.save_result(
             image_id,
             model.name,
             analysis_result.get("score"),
             distribution,
             details,
+            prompt_version_id=prompt_version_id,
+            prompt_name=prompt_name,
+            prompt_version_number=prompt_version_number,
         )
 
         return ImageAnalyzeResponse(

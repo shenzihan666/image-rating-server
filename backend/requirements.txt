@@ -14,6 +14,7 @@ loguru>=0.7.2
 sqlalchemy>=2.0.36
 alembic>=1.14.0
 aiosqlite>=0.20.0
+openai>=2.26.0
 
 # Development dependencies
 pytest>=8.0.0

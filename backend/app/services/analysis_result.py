@@ -30,6 +30,9 @@ class AnalysisResultService:
         score: float | None,
         distribution: list[float] | None = None,
         details: dict | None = None,
+        prompt_version_id: str | None = None,
+        prompt_name: str | None = None,
+        prompt_version_number: int | None = None,
     ) -> AnalysisResult:
         """
         Save an analysis result to the database.
@@ -53,6 +56,9 @@ class AnalysisResultService:
             max_score=max(distribution) if distribution else None,
             distribution=json.dumps(distribution) if distribution else None,
             details=json.dumps(details) if details else None,
+            prompt_version_id=prompt_version_id,
+            prompt_name=prompt_name,
+            prompt_version_number=prompt_version_number,
         )
 
         self.db.add(result)

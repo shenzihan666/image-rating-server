@@ -1,4 +1,4 @@
-/**
+﻿/**
  * TypeScript type definitions for the application
  */
 
@@ -140,13 +140,20 @@ export interface UploadResponse {
   message: string;
 }
 
-export interface UploadHistoryItem {
+export type UploadItemStatus = "pending" | "uploading" | "success" | "duplicated" | "failed";
+
+export interface UploadListItem {
   id: string;
-  file: File;
+  file?: File;
+  file_name: string;
+  file_size: number;
+  file_type: string;
   preview?: string;
-  status: "pending" | "uploading" | "success" | "duplicated" | "failed";
+  status: UploadItemStatus;
   progress: number;
   result?: UploadResult;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -177,3 +184,4 @@ export interface BatchDeleteResponse {
   errors: string[];
   message: string;
 }
+

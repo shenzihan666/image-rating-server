@@ -23,6 +23,7 @@ class AIModel(Base):
     )
     name: Mapped[str] = Column(String(100), unique=True, index=True, nullable=False)
     description: Mapped[str] = Column(Text, nullable=False)
+    config_json: Mapped[str | None] = Column(Text, nullable=True)
     is_active: Mapped[bool] = Column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = Column(

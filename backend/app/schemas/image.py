@@ -2,7 +2,7 @@
 Image schemas for request/response validation
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ImageBase(BaseModel):
@@ -51,11 +51,7 @@ class ImageResponse(BaseModel):
     ai_model: str | None = Field(None, description="AI model used for analysis")
     ai_analyzed_at: str | None = Field(None, description="Analysis timestamp")
 
-    class Config:
-        """Pydantic config."""
-
-        from_attributes = True
-        populate_by_name = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class ImageListResponse(BaseModel):

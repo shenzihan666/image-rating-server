@@ -175,6 +175,78 @@ export interface AIModel {
   description: string;
   is_active: boolean;
   is_loaded: boolean;
+  configurable: boolean;
+  configured: boolean;
+}
+
+export interface AIModelConfigField {
+  key: string;
+  label: string;
+  field_type: "text" | "password" | "url";
+  required: boolean;
+  secret: boolean;
+  placeholder?: string | null;
+  help_text?: string | null;
+}
+
+export interface AIModelDetail extends AIModel {
+  config_fields: AIModelConfigField[];
+  config: Record<string, string>;
+  configured_secret_fields: string[];
+}
+
+export interface AIPromptVersionSummary {
+  id: string;
+  prompt_id: string;
+  version_number: number;
+  commit_message?: string | null;
+  created_by?: string | null;
+  created_at: string;
+}
+
+export interface AIPromptVersionDetail extends AIPromptVersionSummary {
+  system_prompt: string;
+  user_prompt: string;
+}
+
+export interface AIPromptSummary {
+  id: string;
+  model_name: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+  current_version_id?: string | null;
+  current_version_number?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIPromptDetail extends AIPromptSummary {
+  current_version?: AIPromptVersionDetail | null;
+}
+
+export interface CreateAIPromptPayload {
+  model_name: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+  system_prompt: string;
+  user_prompt: string;
+  commit_message?: string | null;
+  created_by?: string | null;
+}
+
+export interface UpdateAIPromptPayload {
+  name?: string;
+  description?: string | null;
+  is_active?: boolean;
+}
+
+export interface CreateAIPromptVersionPayload {
+  system_prompt: string;
+  user_prompt: string;
+  commit_message?: string | null;
+  created_by?: string | null;
 }
 
 /**
@@ -183,6 +255,9 @@ export interface AIModel {
 export const aiAnalyzeApi = {
   getModels: () => api.get<AIModel[]>("/ai/models"),
 
+  getModel: (modelName: string) =>
+    api.get<AIModelDetail>(`/ai/models/${encodeURIComponent(modelName)}`),
+
   setActiveModel: (modelName: string) =>
     api.post("/ai/models/active", { model_name: modelName }),
 
@@ -190,8 +265,51 @@ export const aiAnalyzeApi = {
 
   deactivateActiveModel: () => api.delete("/ai/models/active"),
 
+  updateModelConfig: (modelName: string, config: Record<string, string | null>) =>
+    api.put<AIModelDetail>(`/ai/models/${encodeURIComponent(modelName)}/config`, { config }),
+
   analyzeImage: (imageId: string, forceNew: boolean = false) =>
     api.post("/ai/analyze/" + imageId, { force_new: forceNew }),
+};
+
+export const aiPromptApi = {
+  listPrompts: (modelName?: string) =>
+    api.get<AIPromptSummary[]>("/ai/prompts", {
+      params: modelName ? { model_name: modelName } : undefined,
+    }),
+
+  getPrompt: (promptId: string) =>
+    api.get<AIPromptDetail>(`/ai/prompts/${encodeURIComponent(promptId)}`),
+
+  createPrompt: (payload: CreateAIPromptPayload) =>
+    api.post<AIPromptDetail>("/ai/prompts", payload),
+
+  updatePrompt: (promptId: string, payload: UpdateAIPromptPayload) =>
+    api.patch<AIPromptDetail>(`/ai/prompts/${encodeURIComponent(promptId)}`, payload),
+
+  deletePrompt: (promptId: string) =>
+    api.delete<{ deleted: boolean; prompt_id: string }>(
+      `/ai/prompts/${encodeURIComponent(promptId)}`
+    ),
+
+  listPromptVersions: (promptId: string) =>
+    api.get<AIPromptVersionSummary[]>(
+      `/ai/prompts/${encodeURIComponent(promptId)}/versions`
+    ),
+
+  getPromptVersion: (promptId: string, versionId: string) =>
+    api.get<AIPromptVersionDetail>(
+      `/ai/prompts/${encodeURIComponent(promptId)}/versions/${encodeURIComponent(versionId)}`
+    ),
+
+  createPromptVersion: (
+    promptId: string,
+    payload: CreateAIPromptVersionPayload
+  ) =>
+    api.post<AIPromptVersionDetail>(
+      `/ai/prompts/${encodeURIComponent(promptId)}/versions`,
+      payload
+    ),
 };
 
 /**

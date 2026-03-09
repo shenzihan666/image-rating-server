@@ -2,7 +2,7 @@
 User schemas for request/response validation
 """
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserBase(BaseModel):
@@ -34,8 +34,4 @@ class UserResponse(BaseModel):
     is_active: bool = Field(True, description="Whether user is active")
     created_at: str | None = Field(None, description="Account creation timestamp")
 
-    class Config:
-        """Pydantic config."""
-
-        from_attributes = True
-        populate_by_name = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)

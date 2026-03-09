@@ -1,12 +1,80 @@
 """
-Database-backed AI model state
+Database-backed AI model state.
 """
+import json
+from typing import Any
 
+from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai_model import AIModel
 from app.services.ai.registry import AIModelRegistry
+
+
+def _deserialize_config(config_json: str | None) -> dict[str, Any]:
+    if not config_json:
+        return {}
+
+    try:
+        loaded = json.loads(config_json)
+        return loaded if isinstance(loaded, dict) else {}
+    except json.JSONDecodeError:
+        logger.warning("Failed to decode stored AI model config JSON")
+        return {}
+
+
+def _serialize_config(config: dict[str, Any]) -> str | None:
+    if not config:
+        return None
+    return json.dumps(config, ensure_ascii=False)
+
+
+async def _build_model_payload(record: AIModel) -> dict[str, Any]:
+    registry_model = await AIModelRegistry.get_model(record.name)
+    config = _deserialize_config(record.config_json)
+    config_fields = (
+        [field.to_dict() for field in registry_model.config_fields]
+        if registry_model is not None
+        else []
+    )
+    configurable = registry_model.supports_configuration if registry_model else False
+    configured = registry_model.is_configured(config) if registry_model else True
+
+    return {
+        "name": record.name,
+        "description": record.description,
+        "is_active": record.is_active,
+        "is_loaded": registry_model.is_loaded() if registry_model else False,
+        "configurable": configurable,
+        "configured": configured,
+        "config_fields": config_fields,
+        "config": registry_model.get_public_config(config) if registry_model else {},
+        "configured_secret_fields": (
+            registry_model.get_configured_secret_fields(config) if registry_model else []
+        ),
+    }
+
+
+async def sync_model_runtime_config(db: AsyncSession, name: str) -> None:
+    """Push persisted model configuration into the in-memory analyzer instance."""
+    result = await db.execute(select(AIModel).where(AIModel.name == name))
+    record = result.scalar_one_or_none()
+    if record is None:
+        return
+
+    registry_model = await AIModelRegistry.get_model(name)
+    if registry_model is None:
+        return
+
+    await registry_model.on_config_updated(_deserialize_config(record.config_json))
+
+
+async def sync_all_model_runtime_configs(db: AsyncSession) -> None:
+    """Synchronize persisted model configuration for all registered analyzers."""
+    result = await db.execute(select(AIModel))
+    for record in result.scalars().all():
+        await sync_model_runtime_config(db, record.name)
 
 
 async def ensure_ai_models(db: AsyncSession) -> None:
@@ -30,21 +98,10 @@ async def ensure_ai_models(db: AsyncSession) -> None:
 
 
 async def list_models(db: AsyncSession) -> list[dict]:
-    """List all models from database with registry load status."""
+    """List all models from database with registry/config state."""
     result = await db.execute(select(AIModel).order_by(AIModel.name))
     models = result.scalars().all()
-    items: list[dict] = []
-    for model in models:
-        reg = await AIModelRegistry.get_model(model.name)
-        items.append(
-            {
-                "name": model.name,
-                "description": model.description,
-                "is_active": model.is_active,
-                "is_loaded": reg.is_loaded() if reg else False,
-            }
-        )
-    return items
+    return [await _build_model_payload(model) for model in models]
 
 
 async def get_active_model(db: AsyncSession) -> AIModel | None:
@@ -53,27 +110,69 @@ async def get_active_model(db: AsyncSession) -> AIModel | None:
     return result.scalar_one_or_none()
 
 
-async def set_active_model(db: AsyncSession, name: str) -> str:
-    """Set a model active in registry and database.
-
-    Returns: "ok", "not_found", or "failed"
-    """
+async def get_model_detail(db: AsyncSession, name: str) -> dict[str, Any] | None:
+    """Return detailed model information including public configuration."""
     result = await db.execute(select(AIModel).where(AIModel.name == name))
     record = result.scalar_one_or_none()
     if record is None:
-        return "not_found"
+        return None
+    return await _build_model_payload(record)
 
-    if await AIModelRegistry.get_model(name) is None:
-        return "not_found"
+
+async def update_model_config(
+    db: AsyncSession,
+    name: str,
+    updates: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Persist model configuration and sync it to the runtime analyzer."""
+    result = await db.execute(select(AIModel).where(AIModel.name == name))
+    record = result.scalar_one_or_none()
+    if record is None:
+        return None
+
+    registry_model = await AIModelRegistry.get_model(name)
+    if registry_model is None:
+        return None
+
+    current_config = _deserialize_config(record.config_json)
+    merged_config = registry_model.merge_configuration(current_config, updates)
+    record.config_json = _serialize_config(merged_config)
+    await db.commit()
+    await db.refresh(record)
+
+    await registry_model.on_config_updated(merged_config)
+    if record.is_active:
+        await AIModelRegistry.set_active(name, force_reload=True)
+
+    return await _build_model_payload(record)
+
+
+async def set_active_model(db: AsyncSession, name: str) -> dict[str, Any]:
+    """Set a model active in registry and database."""
+    result = await db.execute(select(AIModel).where(AIModel.name == name))
+    record = result.scalar_one_or_none()
+    if record is None:
+        return {"status": "not_found"}
+
+    registry_model = await AIModelRegistry.get_model(name)
+    if registry_model is None:
+        return {"status": "not_found"}
+
+    config = _deserialize_config(record.config_json)
+    missing_fields = registry_model.get_missing_required_fields(config)
+    if missing_fields:
+        return {"status": "not_configured", "missing_fields": missing_fields}
+
+    await registry_model.on_config_updated(config)
 
     success = await AIModelRegistry.set_active(name)
     if not success:
-        return "failed"
+        return {"status": "failed"}
 
     await db.execute(update(AIModel).values(is_active=False))
     await db.execute(update(AIModel).where(AIModel.name == name).values(is_active=True))
     await db.commit()
-    return "ok"
+    return {"status": "ok"}
 
 
 async def deactivate_model(db: AsyncSession) -> bool:
@@ -90,7 +189,18 @@ async def restore_active_model(db: AsyncSession) -> None:
     if active is None:
         return
 
-    if await AIModelRegistry.get_model(active.name) is None:
+    registry_model = await AIModelRegistry.get_model(active.name)
+    if registry_model is None:
+        await db.execute(
+            update(AIModel).where(AIModel.name == active.name).values(is_active=False)
+        )
+        await db.commit()
+        return
+
+    config = _deserialize_config(active.config_json)
+    await registry_model.on_config_updated(config)
+
+    if not registry_model.is_configured(config):
         await db.execute(
             update(AIModel).where(AIModel.name == active.name).values(is_active=False)
         )

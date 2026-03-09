@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE_PATH: str = "logs/app.log"
 
+    # Qwen3-VL defaults
+    QWEN3_VL_API_KEY: str | None = None
+    QWEN3_VL_BASE_URL: str | None = None
+    QWEN3_VL_MODEL_NAME: str | None = None
+
     # Upload Settings
     UPLOAD_DIR: str = "uploads"
     UPLOAD_MAX_FILE_SIZE: int = 52428800  # 50MB

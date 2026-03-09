@@ -17,6 +17,7 @@ import {
   Bot,
   Loader2,
   Image as ImageIcon,
+  MessageSquareText,
 } from "lucide-react";
 
 const navItems = [
@@ -24,6 +25,11 @@ const navItems = [
   { href: "/dashboard/upload", label: "Upload", icon: Upload },
   { href: "/dashboard/images", label: "Images", icon: ImageIcon },
   { href: "/dashboard/ai-analyze", label: "AI Analyze Server", icon: Bot },
+  {
+    href: "/dashboard/ai-analyze/qwen3-vl/prompts",
+    label: "Qwen Prompts",
+    icon: MessageSquareText,
+  },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 
@@ -58,6 +64,21 @@ export default function DashboardLayout({
 
   const handleLogout = async () => {
     await signOut({ callbackUrl: "/login" });
+  };
+
+  const isNavItemActive = (href: string) => {
+    if (href === "/dashboard") {
+      return pathname === href;
+    }
+
+    if (href === "/dashboard/ai-analyze") {
+      return (
+        pathname.startsWith("/dashboard/ai-analyze") &&
+        !pathname.startsWith("/dashboard/ai-analyze/qwen3-vl/prompts")
+      );
+    }
+
+    return pathname === href || pathname.startsWith(`${href}/`);
   };
 
   return (
@@ -121,7 +142,7 @@ export default function DashboardLayout({
 
               <nav className="p-4 space-y-1">
                 {navItems.map((item) => {
-                  const isActive = pathname === item.href;
+                  const isActive = isNavItemActive(item.href);
                   return (
                     <Link
                       key={item.href}
@@ -191,7 +212,7 @@ export default function DashboardLayout({
           {/* Navigation */}
           <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
             {navItems.map((item) => {
-              const isActive = pathname === item.href;
+              const isActive = isNavItemActive(item.href);
               return (
                 <Link
                   key={item.href}

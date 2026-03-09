@@ -27,6 +27,7 @@ dependencies = [
     "opencv-python>=4.8.0",
     "numpy>=1.24.0",
     "aiofiles>=24.1.0",
+    "openai>=2.26.0",
 ]
 
 [dependency-groups]
@@ -54,10 +55,12 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501"]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["app"]
 
 [tool.mypy]
@@ -66,5 +69,7 @@ strict = true
 ignore-missing-imports = true
 
 [tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]

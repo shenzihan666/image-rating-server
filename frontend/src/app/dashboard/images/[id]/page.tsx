@@ -33,9 +33,34 @@ interface AnalysisResult {
     distribution?: Record<string, number>;
     min_score?: number;
     max_score?: number;
+    result?: Record<string, unknown>;
+    raw_text?: string;
+    usage?: Record<string, number | string | null>;
+    prompt?: {
+      prompt_name?: string | null;
+      prompt_version_id?: string | null;
+      prompt_version_number?: number | null;
+    };
     [key: string]: unknown;
   };
   created_at: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function formatScalarValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value, null, 2);
+}
+
+function titleizeKey(key: string): string {
+  return key
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export default function ImageDetailPage() {
@@ -397,57 +422,12 @@ export default function ImageDetailPage() {
 
           {/* AI Analysis Result */}
           {analysisResult && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="glass-card rounded-2xl p-6 bg-gradient-to-br from-purple-50 to-pink-50 border-purple-100"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-medium text-purple-600 uppercase tracking-wide">
-                  AI Analysis
-                </h2>
-                <span className="text-xs px-2 py-1 bg-purple-100 text-purple-600 rounded-full">
-                  {analysisResult.model.toUpperCase()}
-                </span>
-              </div>
-
-              {analysisResult.score !== null && (
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-                    <Sparkles className="w-7 h-7 text-white" />
-                  </div>
-                  <div>
-                    <p className="text-3xl font-bold text-[#333333]">
-                      {analysisResult.score.toFixed(2)}
-                    </p>
-                    <p className="text-sm text-[#333333]/60">Quality Score</p>
-                  </div>
-                </div>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+              {analysisResult.model === "qwen3-vl" ? (
+                <QwenAnalysisPanel analysisResult={analysisResult} />
+              ) : (
+                <DefaultAnalysisPanel analysisResult={analysisResult} />
               )}
-
-              {analysisResult.details.distribution && (
-                <div className="mt-4">
-                  <p className="text-xs text-[#333333]/50 mb-2">Score Distribution</p>
-                  <div className="flex items-end gap-1 h-16">
-                    {Object.entries(analysisResult.details.distribution).map(([score, probability]) => (
-                      <div
-                        key={score}
-                        className="flex-1 flex flex-col items-center gap-1"
-                      >
-                        <div
-                          className="w-full bg-gradient-to-t from-purple-500 to-pink-400 rounded-t-sm transition-all"
-                          style={{ height: `${probability * 100}%` }}
-                        />
-                        <span className="text-xs text-[#333333]/50">{score}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <p className="text-xs text-[#333333]/40 mt-4">
-                Analyzed at {new Date(analysisResult.created_at).toLocaleString()}
-              </p>
             </motion.div>
           )}
 
@@ -469,6 +449,259 @@ export default function ImageDetailPage() {
           )}
         </motion.div>
       </div>
+    </div>
+  );
+}
+
+function DefaultAnalysisPanel({ analysisResult }: { analysisResult: AnalysisResult }) {
+  return (
+    <div className="glass-card rounded-2xl border border-purple-100 bg-gradient-to-br from-purple-50 to-pink-50 p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-purple-600">
+          AI Analysis
+        </h2>
+        <span className="rounded-full bg-purple-100 px-2 py-1 text-xs text-purple-600">
+          {analysisResult.model.toUpperCase()}
+        </span>
+      </div>
+
+      {analysisResult.score !== null && (
+        <div className="mb-4 flex items-center gap-4">
+          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-pink-500">
+            <Sparkles className="h-7 w-7 text-white" />
+          </div>
+          <div>
+            <p className="text-3xl font-bold text-[#333333]">
+              {analysisResult.score.toFixed(2)}
+            </p>
+            <p className="text-sm text-[#333333]/60">Quality Score</p>
+          </div>
+        </div>
+      )}
+
+      {analysisResult.details.distribution && (
+        <div className="mt-4">
+          <p className="mb-2 text-xs text-[#333333]/50">Score Distribution</p>
+          <div className="flex h-16 items-end gap-1">
+            {Object.entries(analysisResult.details.distribution).map(([score, probability]) => (
+              <div key={score} className="flex flex-1 flex-col items-center gap-1">
+                <div
+                  className="w-full rounded-t-sm bg-gradient-to-t from-purple-500 to-pink-400 transition-all"
+                  style={{ height: `${probability * 100}%` }}
+                />
+                <span className="text-xs text-[#333333]/50">{score}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="mt-4 text-xs text-[#333333]/40">
+        Analyzed at {new Date(analysisResult.created_at).toLocaleString()}
+      </p>
+    </div>
+  );
+}
+
+function QwenAnalysisPanel({ analysisResult }: { analysisResult: AnalysisResult }) {
+  const resultPayload = isRecord(analysisResult.details.result)
+    ? analysisResult.details.result
+    : {};
+  const usage = isRecord(analysisResult.details.usage) ? analysisResult.details.usage : {};
+  const prompt = isRecord(analysisResult.details.prompt) ? analysisResult.details.prompt : {};
+  const summary = typeof resultPayload.summary === "string" ? resultPayload.summary : null;
+  const strengths = Array.isArray(resultPayload.strengths) ? resultPayload.strengths : [];
+  const weaknesses = Array.isArray(resultPayload.weaknesses) ? resultPayload.weaknesses : [];
+  const tags = Array.isArray(resultPayload.tags) ? resultPayload.tags : [];
+  const genericEntries = Object.entries(resultPayload).filter(([key]) => {
+    return !["score", "summary", "strengths", "weaknesses", "tags", "model", "usage", "prompt"].includes(key);
+  });
+  const rawDisplay = typeof analysisResult.details.raw_text === "string"
+    ? analysisResult.details.raw_text
+    : JSON.stringify(resultPayload, null, 2);
+
+  return (
+    <div className="glass-card rounded-2xl border border-[#D8CEC0] bg-[linear-gradient(140deg,#f7f3ea_0%,#f8efe2_45%,#fffdf9_100%)] p-6">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-sm font-medium uppercase tracking-wide text-[#8C5D2E]">
+            Qwen3-VL Analysis
+          </h2>
+          <p className="mt-1 text-sm text-[#333333]/60">
+            Structured result, token usage, prompt version, and raw provider output.
+          </p>
+        </div>
+        <span className="rounded-full bg-[#F2E5D1] px-3 py-1 text-xs font-medium text-[#8C5D2E]">
+          {analysisResult.model.toUpperCase()}
+        </span>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          label="Overall Score"
+          value={analysisResult.score !== null ? analysisResult.score.toFixed(2) : "N/A"}
+        />
+        <MetricCard
+          label="Model"
+          value={typeof resultPayload.model === "string" ? resultPayload.model : "qwen3-vl"}
+        />
+        <MetricCard
+          label="Prompt Version"
+          value={
+            typeof prompt.prompt_version_number === "number"
+              ? `v${prompt.prompt_version_number}`
+              : "Unknown"
+          }
+        />
+        <MetricCard
+          label="Total Tokens"
+          value={
+            typeof usage.total_tokens === "number" || typeof usage.total_tokens === "string"
+              ? String(usage.total_tokens)
+              : "N/A"
+          }
+        />
+      </div>
+
+      {(typeof usage.prompt_tokens === "number" ||
+        typeof usage.completion_tokens === "number" ||
+        typeof usage.total_tokens === "number") && (
+        <div className="mt-4 rounded-2xl border border-[#E4D9CA] bg-white/75 p-4">
+          <div className="grid gap-3 text-sm text-[#333333]/70 sm:grid-cols-3">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-[#333333]/45">Prompt Tokens</div>
+              <div className="mt-1 font-semibold text-[#333333]">
+                {typeof usage.prompt_tokens === "number" || typeof usage.prompt_tokens === "string"
+                  ? String(usage.prompt_tokens)
+                  : "N/A"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-[#333333]/45">Completion Tokens</div>
+              <div className="mt-1 font-semibold text-[#333333]">
+                {typeof usage.completion_tokens === "number" ||
+                typeof usage.completion_tokens === "string"
+                  ? String(usage.completion_tokens)
+                  : "N/A"}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-[#333333]/45">Prompt Name</div>
+              <div className="mt-1 font-semibold text-[#333333]">
+                {typeof prompt.prompt_name === "string" ? prompt.prompt_name : "Unknown"}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {summary && (
+        <div className="mt-4 rounded-2xl border border-[#E4D9CA] bg-white/75 p-4">
+          <div className="text-xs uppercase tracking-wide text-[#333333]/45">Summary</div>
+          <p className="mt-2 text-sm leading-6 text-[#333333]/75">{summary}</p>
+        </div>
+      )}
+
+      {(strengths.length > 0 || weaknesses.length > 0) && (
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          {strengths.length > 0 && (
+            <ListCard title="Strengths" items={strengths} tone="emerald" />
+          )}
+          {weaknesses.length > 0 && (
+            <ListCard title="Weaknesses" items={weaknesses} tone="amber" />
+          )}
+        </div>
+      )}
+
+      {tags.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-[#E4D9CA] bg-white/75 p-4">
+          <div className="text-xs uppercase tracking-wide text-[#333333]/45">Tags</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {tags.map((tag, index) => (
+              <span
+                key={`${tag}-${index}`}
+                className="rounded-full bg-[#F2E5D1] px-3 py-1 text-xs font-medium text-[#8C5D2E]"
+              >
+                {String(tag)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {genericEntries.length > 0 && (
+        <div className="mt-4 rounded-2xl border border-[#E4D9CA] bg-white/75 p-4">
+          <div className="text-xs uppercase tracking-wide text-[#333333]/45">Structured Fields</div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {genericEntries.map(([key, value]) => (
+              <div key={key} className="rounded-xl border border-[#EFE7DA] bg-[#FCFBF7] px-4 py-3">
+                <div className="text-xs uppercase tracking-wide text-[#333333]/45">
+                  {titleizeKey(key)}
+                </div>
+                {Array.isArray(value) ? (
+                  <ul className="mt-2 list-disc pl-5 text-sm text-[#333333]/75">
+                    {value.map((item, index) => (
+                      <li key={`${key}-${index}`}>{formatScalarValue(item)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <pre className="mt-2 whitespace-pre-wrap break-words text-sm text-[#333333]/75">
+                    {formatScalarValue(value)}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <details className="mt-4 rounded-2xl border border-[#DCCFBE] bg-[#FBF8F1] p-4">
+        <summary className="cursor-pointer text-sm font-medium text-[#333333]">
+          Raw Provider Output
+        </summary>
+        <pre className="mt-3 max-h-[280px] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-[#121212] p-4 font-mono text-xs text-[#F5F5F5]">
+          {rawDisplay}
+        </pre>
+      </details>
+
+      <p className="mt-4 text-xs text-[#333333]/40">
+        Analyzed at {new Date(analysisResult.created_at).toLocaleString()}
+      </p>
+    </div>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-[#E4D9CA] bg-white/80 px-4 py-4">
+      <div className="text-xs uppercase tracking-wide text-[#333333]/45">{label}</div>
+      <div className="mt-2 text-xl font-semibold text-[#333333]">{value}</div>
+    </div>
+  );
+}
+
+function ListCard({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: unknown[];
+  tone: "emerald" | "amber";
+}) {
+  const accentClass =
+    tone === "emerald"
+      ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
+      : "border-amber-200 bg-amber-50/80 text-amber-900";
+
+  return (
+    <div className={cn("rounded-2xl border p-4", accentClass)}>
+      <div className="text-xs uppercase tracking-wide opacity-60">{title}</div>
+      <ul className="mt-3 space-y-2 text-sm leading-6">
+        {items.map((item, index) => (
+          <li key={`${title}-${index}`}>- {formatScalarValue(item)}</li>
+        ))}
+      </ul>
     </div>
   );
 }

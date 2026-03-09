@@ -4,7 +4,7 @@ Analysis Result database model - stores AI analysis results persistently
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
 
 from app.core.database import Base
 
@@ -30,6 +30,9 @@ class AnalysisResult(Base):
     max_score: float | None = Column(Float, nullable=True)
     distribution: str | None = Column(Text, nullable=True)  # JSON encoded distribution array
     details: str | None = Column(Text, nullable=True)  # JSON encoded full details
+    prompt_version_id: str | None = Column(String(36), nullable=True, index=True)
+    prompt_name: str | None = Column(String(255), nullable=True)
+    prompt_version_number: int | None = Column(Integer, nullable=True)
     created_at: datetime = Column(DateTime, default=datetime.utcnow, index=True)
 
     def __repr__(self) -> str:

@@ -11,9 +11,10 @@ IMPORTANT: Environment must be set up before importing app modules.
 """
 import asyncio
 import os
-import tempfile
+import shutil
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
-from typing import AsyncGenerator, Generator
+from uuid import uuid4
 
 # Set test environment BEFORE importing app modules
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -21,11 +22,29 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing-only-not-for-pr
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_app.db")
 
 import pytest
-import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core.config import settings
 from app.main import app
+
+
+@pytest.fixture(scope="function")
+def tmp_path() -> Generator[Path, None, None]:
+    """
+    Create a writable temporary directory inside the repository workspace.
+
+    The sandbox cannot reliably write to the default user temp directory on
+    this machine, so tests use a repo-local scratch area instead.
+    """
+    base_dir = Path.cwd() / ".tmp" / "pytest"
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    test_dir = base_dir / uuid4().hex
+    test_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        yield test_dir
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")

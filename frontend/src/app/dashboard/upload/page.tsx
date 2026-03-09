@@ -1,321 +1,500 @@
-"use client";
+﻿"use client";
 
-import { useCallback, useState, useRef, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  Upload,
-  X,
-  Image as ImageIcon,
-  CheckCircle,
   AlertTriangle,
-  XCircle,
-  Loader2,
+  Check,
+  CheckCircle,
+  Clock3,
   FileImage,
+  Image as ImageIcon,
+  Loader2,
+  Trash2,
+  Upload,
+  XCircle,
 } from "lucide-react";
 
 import { uploadApi, type ApiError } from "@/lib/api";
-import { cn, formatFileSize, computeFileHash, formatRelativeTime } from "@/lib/utils";
-import type { UploadHistoryItem, UploadResult } from "@/types";
+import { loadUploadInbox, saveUploadInbox } from "@/lib/upload-persistence";
+import { cn, computeFileHash, formatFileSize, formatRelativeTime } from "@/lib/utils";
+import type { UploadItemStatus, UploadListItem } from "@/types";
 
-// Supported image types
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-const MAX_FILES = 10;
+const MAX_BATCH_FILES = 10;
+const MAX_ITEMS = 100;
 
-// Status badge styles
-const statusStyles = {
-  pending: "bg-gray-100 text-gray-600 border-gray-200",
-  uploading: "bg-blue-100 text-blue-600 border-blue-200",
-  success: "bg-green-100 text-green-600 border-green-200",
-  duplicated: "bg-amber-100 text-amber-600 border-amber-200",
-  failed: "bg-red-100 text-red-600 border-red-200",
+type FilterKey = "all" | "ready" | "completed" | "failed";
+
+const statusStyles: Record<UploadItemStatus, string> = {
+  pending: "bg-slate-100 text-slate-700 border-slate-200",
+  uploading: "bg-sky-100 text-sky-700 border-sky-200",
+  success: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  duplicated: "bg-amber-100 text-amber-700 border-amber-200",
+  failed: "bg-rose-100 text-rose-700 border-rose-200",
 };
 
 const statusIcons = {
-  pending: null,
+  pending: Clock3,
   uploading: Loader2,
   success: CheckCircle,
   duplicated: AlertTriangle,
   failed: XCircle,
-};
+} satisfies Record<UploadItemStatus, React.ComponentType<{ className?: string }>>;
 
-const statusLabels = {
-  pending: "Pending",
+const statusLabels: Record<UploadItemStatus, string> = {
+  pending: "Ready",
   uploading: "Uploading",
-  success: "Success",
+  success: "Uploaded",
   duplicated: "Duplicate",
   failed: "Failed",
 };
 
-const getUploadFailureMessage = (status?: number): string => {
+function getUploadFailureMessage(status?: number): string {
   if (status === 401 || status === 403) {
-    return "登录过期或无权限";
+    return "Session expired or permission denied.";
   }
   if (status === 422) {
-    return "上传参数错误/文件为空";
+    return "The upload payload is invalid or the file is empty.";
   }
-  return "服务异常，请稍后重试";
-};
+  return "Upload failed. Please try again.";
+}
 
-export default function UploadPage() {
-  const [files, setFiles] = useState<UploadHistoryItem[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadHistory, setUploadHistory] = useState<
-    Array<{ file: File; result: UploadResult; timestamp: Date }>
-  >([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+function createUploadId(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
-  // Load upload history from localStorage
-  useEffect(() => {
-    const savedHistory = localStorage.getItem("uploadHistory");
-    if (savedHistory) {
-      try {
-        const parsed = JSON.parse(savedHistory);
-        setUploadHistory(
-          parsed.map((item: { fileName: string; fileSize: number; result: UploadResult; timestamp: string }) => ({
-            file: { name: item.fileName, size: item.fileSize } as File,
-            result: item.result,
-            timestamp: new Date(item.timestamp),
-          }))
-        );
-      } catch {
-        // Ignore parsing errors
-      }
-    }
-  }, []);
+function createPreview(file?: File): string | undefined {
+  return file ? URL.createObjectURL(file) : undefined;
+}
 
-  // Save upload history to localStorage
-  const saveToHistory = (file: File, result: UploadResult) => {
-    const updated = [
-      { file, result, timestamp: new Date() },
-      ...uploadHistory.slice(0, 49), // Keep last 50 items
-    ];
+function revokePreview(item: Pick<UploadListItem, "preview">): void {
+  if (item.preview) {
+    URL.revokeObjectURL(item.preview);
+  }
+}
 
-    setUploadHistory(updated);
+function isUploadable(item: UploadListItem): boolean {
+  return (item.status === "pending" || item.status === "failed") && Boolean(item.file);
+}
 
-    // Save to localStorage (without File objects)
-    const storableHistory = updated.map((item) => ({
-      fileName: item.file.name,
-      fileSize: item.file.size,
-      result: item.result,
-      timestamp: item.timestamp.toISOString(),
-    }));
-    localStorage.setItem("uploadHistory", JSON.stringify(storableHistory));
+function isCompleted(item: UploadListItem): boolean {
+  return item.status === "success" || item.status === "duplicated";
+}
+
+function compareItems(a: UploadListItem, b: UploadListItem): number {
+  const order: Record<UploadItemStatus, number> = {
+    uploading: 0,
+    pending: 1,
+    failed: 2,
+    duplicated: 3,
+    success: 4,
   };
 
-  // Validate files
+  const byStatus = order[a.status] - order[b.status];
+  if (byStatus !== 0) {
+    return byStatus;
+  }
+
+  return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+}
+
+function chunkItems<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function buildUploadItem(file: File): UploadListItem {
+  const timestamp = new Date().toISOString();
+  return {
+    id: createUploadId(),
+    file,
+    file_name: file.name,
+    file_size: file.size,
+    file_type: file.type,
+    preview: createPreview(file),
+    status: "pending",
+    progress: 0,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+function attachPreviews(items: UploadListItem[]): UploadListItem[] {
+  return items.map((item) => ({
+    ...item,
+    preview: item.preview ?? createPreview(item.file),
+  }));
+}
+
+function trimItems(items: UploadListItem[]): UploadListItem[] {
+  if (items.length <= MAX_ITEMS) {
+    return items;
+  }
+
+  const sorted = [...items].sort(compareItems);
+  const keep = sorted.slice(0, MAX_ITEMS);
+  const keepIds = new Set(keep.map((item) => item.id));
+
+  items.forEach((item) => {
+    if (!keepIds.has(item.id)) {
+      revokePreview(item);
+    }
+  });
+
+  return keep;
+}
+
+export default function UploadPage() {
+  const [items, setItems] = useState<UploadListItem[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const itemsRef = useRef<UploadListItem[]>([]);
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      try {
+        const storedItems = attachPreviews(await loadUploadInbox());
+        if (!active) {
+          storedItems.forEach(revokePreview);
+          return;
+        }
+        setItems(storedItems);
+      } catch (error) {
+        console.error("Failed to restore upload inbox", error);
+        if (active) {
+          setNotice("Local upload queue could not be restored.");
+        }
+      } finally {
+        if (active) {
+          setIsHydrated(true);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+      itemsRef.current.forEach(revokePreview);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+
+    void saveUploadInbox(items).catch((error) => {
+      console.error("Failed to persist upload inbox", error);
+      setNotice("Changes were made, but local persistence failed.");
+    });
+  }, [items, isHydrated]);
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const activeIds = new Set(items.map((item) => item.id));
+      const next = new Set([...prev].filter((id) => activeIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+
+    if (items.length === 0) {
+      setSelectionMode(false);
+    }
+  }, [items]);
+
   const validateFiles = useCallback((fileList: FileList | File[]): { valid: File[]; errors: string[] } => {
     const valid: File[] = [];
     const errors: string[] = [];
-    const fileArray = Array.from(fileList);
 
-    fileArray.forEach((file) => {
+    Array.from(fileList).forEach((file) => {
       if (!ACCEPTED_TYPES.includes(file.type)) {
-        errors.push(`${file.name}: Unsupported file type`);
-      } else {
-        valid.push(file);
+        errors.push(`${file.name}: unsupported file type.`);
+        return;
       }
-    });
 
-    if (valid.length > MAX_FILES) {
-      errors.push(`Maximum ${MAX_FILES} files allowed. Only first ${MAX_FILES} will be uploaded.`);
-      return { valid: valid.slice(0, MAX_FILES), errors };
-    }
+      valid.push(file);
+    });
 
     return { valid, errors };
   }, []);
 
-  // Add files to upload queue
   const addFiles = useCallback((fileList: FileList | File[]) => {
-    const { valid } = validateFiles(fileList);
+    const { valid, errors } = validateFiles(fileList);
 
-    const newFiles: UploadHistoryItem[] = valid.map((file) => ({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      file,
-      preview: URL.createObjectURL(file),
-      status: "pending",
-      progress: 0,
-    }));
+    if (errors.length > 0) {
+      setNotice(errors.join(" "));
+    } else {
+      setNotice(null);
+    }
 
-    setFiles((prev) => [...prev, ...newFiles]);
+    if (valid.length === 0) {
+      return;
+    }
+
+    const newItems = valid.map(buildUploadItem);
+    setItems((prev) => trimItems([...newItems, ...prev]));
   }, [validateFiles]);
 
-  // Handle drag events
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleDragEnter = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
     setIsDragging(true);
   }, []);
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
     setIsDragging(false);
   }, []);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
   }, []);
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDragging(false);
+  const handleDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
 
-      const droppedFiles = e.dataTransfer.files;
-      if (droppedFiles.length > 0) {
-        addFiles(droppedFiles);
-      }
-    },
-    [addFiles]
-  );
+    if (event.dataTransfer.files.length > 0) {
+      addFiles(event.dataTransfer.files);
+    }
+  }, [addFiles]);
 
-  // Handle file input change
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      addFiles(e.target.files);
-      e.target.value = ""; // Reset input
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files.length > 0) {
+      addFiles(event.target.files);
+      event.target.value = "";
     }
   };
 
-  // Remove file from queue
-  const removeFile = (id: string) => {
-    setFiles((prev) => {
-      const file = prev.find((f) => f.id === id);
-      if (file?.preview) {
-        URL.revokeObjectURL(file.preview);
-      }
-      return prev.filter((f) => f.id !== id);
+  const removeItems = useCallback((ids: Iterable<string>) => {
+    const idSet = new Set(ids);
+    setItems((prev) => {
+      prev.forEach((item) => {
+        if (idSet.has(item.id)) {
+          revokePreview(item);
+        }
+      });
+      return prev.filter((item) => !idSet.has(item.id));
     });
-  };
+    setSelectedIds((prev) => new Set([...prev].filter((id) => !idSet.has(id))));
+  }, []);
 
-  // Upload all files
-  const uploadAllFiles = async () => {
-    if (files.length === 0 || isUploading) return;
+  const updateItems = useCallback((ids: Set<string>, updater: (_item: UploadListItem) => UploadListItem) => {
+    setItems((prev) => prev.map((item) => (ids.has(item.id) ? updater(item) : item)));
+  }, []);
 
-    const toUpload = files.filter((f) => f.status === "pending");
-    if (toUpload.length === 0) return;
+  const uploadItemsByIds = useCallback(async (ids: Iterable<string>) => {
+    if (isUploading) {
+      return;
+    }
 
-    const toUploadIds = new Set(toUpload.map((f) => f.id));
+    const requestedIds = new Set(ids);
+    const uploadableItems = items.filter((item) => requestedIds.has(item.id) && isUploadable(item));
+    if (uploadableItems.length === 0) {
+      return;
+    }
 
+    setNotice(null);
     setIsUploading(true);
 
-    // Mark selected pending files as uploading
-    setFiles((prev) =>
-      prev.map((f) => (toUploadIds.has(f.id) ? { ...f, status: "uploading" as const } : f))
-    );
+    const batches = chunkItems(uploadableItems, MAX_BATCH_FILES);
 
-    try {
-      // Compute hashes for selected files
-      const hashes = await Promise.all(
-        toUpload.map(async (f) => ({
-          id: f.id,
-          hash: await computeFileHash(f.file),
-        }))
-      );
+    for (const batch of batches) {
+      const batchIds = new Set(batch.map((item) => item.id));
+      const startedAt = new Date().toISOString();
 
-      // Upload files
-      const response = await uploadApi.uploadImages(
-        toUpload.map((f) => f.file),
-        hashes.map((h) => h.hash),
-        (progress) => {
-          // Update progress for selected files only
-          setFiles((prev) =>
-            prev.map((f) =>
-              toUploadIds.has(f.id) ? { ...f, progress } : f
-            )
-          );
-        }
-      );
+      updateItems(batchIds, (item) => ({
+        ...item,
+        status: "uploading",
+        progress: 0,
+        updated_at: startedAt,
+      }));
 
-      // Process results
-      const results = response.data.results;
+      try {
+        const hashes = await Promise.all(
+          batch.map(async (item) => ({
+            id: item.id,
+            hash: await computeFileHash(item.file as File),
+          }))
+        );
 
-      setFiles((prev) => {
-        const updated = [...prev];
-        results.forEach((result, index) => {
-          const targetFile = toUpload[index];
-          if (!targetFile) return;
-
-          const fileIndex = updated.findIndex((f) => f.id === targetFile.id);
-          if (fileIndex !== -1) {
-            updated[fileIndex] = {
-              ...updated[fileIndex],
-              status: result.status,
-              progress: 100,
-              result,
-            };
-
-            // Save to history
-            saveToHistory(updated[fileIndex].file, result);
+        const response = await uploadApi.uploadImages(
+          batch.map((item) => item.file as File),
+          hashes.map((hashItem) => hashItem.hash),
+          (progress) => {
+            updateItems(batchIds, (item) => ({
+              ...item,
+              progress,
+              updated_at: new Date().toISOString(),
+            }));
           }
-        });
-        return updated;
-      });
-    } catch (error) {
-      console.error("Upload error:", error);
-      const message = getUploadFailureMessage((error as ApiError | undefined)?.status);
+        );
 
-      // Mark selected files as failed
-      setFiles((prev) =>
-        prev.map((f) =>
-          toUploadIds.has(f.id)
-            ? {
-                ...f,
-                status: "failed" as const,
-                result: {
-                  status: "failed",
-                  original_filename: f.file.name,
-                  error_message: message,
-                  is_duplicate: false,
-                },
-              }
-            : f
-        )
-      );
-    } finally {
-      setIsUploading(false);
+        const completedAt = new Date().toISOString();
+        const resultsById = new Map(batch.map((item, index) => [item.id, response.data.results[index]]));
+
+        updateItems(batchIds, (item) => {
+          const result = resultsById.get(item.id);
+          if (!result) {
+            return item;
+          }
+
+          return {
+            ...item,
+            status: result.status,
+            progress: 100,
+            result,
+            updated_at: completedAt,
+          };
+        });
+      } catch (error) {
+        console.error("Upload error", error);
+        const message = getUploadFailureMessage((error as ApiError | undefined)?.status);
+        const failedAt = new Date().toISOString();
+
+        updateItems(batchIds, (item) => ({
+          ...item,
+          status: "failed",
+          progress: 0,
+          result: {
+            status: "failed",
+            original_filename: item.file_name,
+            error_message: message,
+            is_duplicate: false,
+          },
+          updated_at: failedAt,
+        }));
+      }
     }
+
+    setIsUploading(false);
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }, [isUploading, items, updateItems]);
+
+  const handleUploadAll = async () => {
+    await uploadItemsByIds(items.filter(isUploadable).map((item) => item.id));
   };
 
-  // Clear completed files
-  const clearCompleted = () => {
-    setFiles((prev) => {
-      prev.forEach((f) => {
-        if (f.preview) {
-          URL.revokeObjectURL(f.preview);
-        }
-      });
-      return prev.filter((f) => f.status === "pending");
+  const handleUploadSelected = async () => {
+    await uploadItemsByIds(selectedIds);
+  };
+
+  const handleClearCompleted = () => {
+    removeItems(items.filter(isCompleted).map((item) => item.id));
+  };
+
+  const toggleSelectionMode = () => {
+    setSelectionMode((prev) => {
+      if (prev) {
+        setSelectedIds(new Set());
+      }
+      return !prev;
     });
   };
 
-  const pendingCount = files.filter((f) => f.status === "pending").length;
-  const hasUploading = files.some((f) => f.status === "uploading");
+  const toggleSelectAllVisible = () => {
+    const visibleIds = displayItems.map((item) => item.id);
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      visibleIds.forEach((id) => {
+        if (allVisibleSelected) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+      });
+      return next;
+    });
+  };
+
+  const toggleItemSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const readyCount = useMemo(() => items.filter(isUploadable).length, [items]);
+  const completedCount = useMemo(() => items.filter(isCompleted).length, [items]);
+  const failedCount = useMemo(() => items.filter((item) => item.status === "failed").length, [items]);
+  const hasUploading = useMemo(() => items.some((item) => item.status === "uploading"), [items]);
+
+  const summary = useMemo(() => ({
+    total: items.length,
+    ready: readyCount,
+    completed: completedCount,
+    failed: failedCount,
+    uploading: items.filter((item) => item.status === "uploading").length,
+  }), [completedCount, failedCount, items, readyCount]);
+
+  const filters = useMemo(() => ([
+    { key: "all" as const, label: "All", count: items.length },
+    { key: "ready" as const, label: "Ready", count: readyCount },
+    { key: "completed" as const, label: "Completed", count: completedCount },
+    { key: "failed" as const, label: "Failed", count: failedCount },
+  ]), [completedCount, failedCount, items.length, readyCount]);
+
+  const displayItems = useMemo(() => {
+    const filtered = items.filter((item) => {
+      if (filter === "ready") {
+        return isUploadable(item);
+      }
+      if (filter === "completed") {
+        return isCompleted(item);
+      }
+      if (filter === "failed") {
+        return item.status === "failed";
+      }
+      return true;
+    });
+
+    return [...filtered].sort(compareItems);
+  }, [filter, items]);
+
+  const selectedItems = useMemo(() => items.filter((item) => selectedIds.has(item.id)), [items, selectedIds]);
+  const selectedReadyCount = useMemo(() => selectedItems.filter(isUploadable).length, [selectedItems]);
+  const allVisibleSelected = displayItems.length > 0 && displayItems.every((item) => selectedIds.has(item.id));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold text-[#333333]">Upload Images</h1>
-        <p className="text-[#333333]/60 mt-1">
-          Upload and manage your images for AI quality analysis
-        </p>
-      </div>
-
-      {/* Drop Zone */}
+    <div className="mx-auto max-w-5xl space-y-6">
       <motion.div
         className={cn(
-          "relative glass-card rounded-2xl p-8 transition-all duration-300",
-          isDragging && "ring-2 ring-[#333333] ring-offset-2 bg-[#333333]/5"
+          "relative overflow-hidden rounded-[28px] border border-[#E6E1DA] bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(248,244,238,0.92))] p-8 shadow-[0_25px_80px_rgba(34,34,34,0.08)]",
+          isDragging && "border-[#222222] bg-[linear-gradient(135deg,rgba(255,255,255,1),rgba(240,232,220,0.98))]"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(244,193,78,0.18),transparent_36%),radial-gradient(circle_at_bottom_left,rgba(34,34,34,0.08),transparent_42%)]" />
         <input
           ref={fileInputRef}
           type="file"
@@ -325,263 +504,299 @@ export default function UploadPage() {
           className="hidden"
         />
 
-        <div
-          className="flex flex-col items-center justify-center cursor-pointer py-8"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <div className="w-16 h-16 rounded-full bg-[#333333]/10 flex items-center justify-center mb-4">
-            <Upload className="w-8 h-8 text-[#333333]/60" />
+        <div className="relative flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-2xl space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.32em] text-[#333333]/45">Upload workspace</p>
+            <h1 className="text-[clamp(2rem,4vw,3.25rem)] font-semibold tracking-[-0.05em] text-[#222222]">Upload</h1>
+            <p className="max-w-xl text-sm leading-6 text-[#333333]/62">
+              Choose local image files and keep the queue moving from one place.
+            </p>
           </div>
-          <p className="text-lg font-medium text-[#333333] mb-2">
-            Drop images here or click to select
-          </p>
-          <p className="text-sm text-[#333333]/50">
-            Supports: JPG, PNG, GIF, WEBP (Max {MAX_FILES} files)
-          </p>
+
+          <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="group relative isolate min-w-[220px] cursor-pointer overflow-hidden rounded-[24px] border border-[#222222]/10 bg-[#222222] px-6 py-4 text-left text-white shadow-[0_24px_60px_rgba(34,34,34,0.22)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_28px_70px_rgba(34,34,34,0.28)]"
+            >
+              <span className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.2),transparent_45%,rgba(244,193,78,0.34))] opacity-90 transition duration-200 group-hover:opacity-100" />
+              <span className="relative flex items-center gap-4">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/12 ring-1 ring-white/14 backdrop-blur-sm">
+                  <Upload className="h-5 w-5" />
+                </span>
+                <span className="flex flex-col items-start">
+                  <span className="text-base font-semibold tracking-[0.02em]">Upload</span>
+                  <span className="text-xs uppercase tracking-[0.22em] text-white/70">Choose local files</span>
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={handleUploadAll}
+              disabled={readyCount === 0 || isUploading}
+              className={cn(
+                "cursor-pointer rounded-2xl border px-5 py-3 text-sm font-medium transition",
+                readyCount > 0 && !isUploading
+                  ? "border-[#222222]/15 bg-white text-[#222222] hover:border-[#222222]/35 hover:bg-[#222222]/[0.03]"
+                  : "cursor-not-allowed border-[#DDD6CC] bg-[#F3EEE7] text-[#333333]/35"
+              )}
+            >
+              {isUploading ? "Uploading..." : "Start upload"}
+            </button>
+          </div>
         </div>
       </motion.div>
 
-      {/* Selected Files */}
-      <AnimatePresence>
-        {files.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="glass-card rounded-2xl overflow-hidden"
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b border-[#E0E0E0]">
-              <div className="flex items-center gap-3">
-                <h2 className="font-medium text-[#333333]">
-                  Selected Files ({files.length})
-                </h2>
-                {pendingCount > 0 && (
-                  <span className="text-sm text-[#333333]/50">
-                    ({pendingCount} pending)
-                  </span>
+      {notice && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {notice}
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-[28px] border border-[#E6E1DA] bg-white shadow-[0_20px_70px_rgba(34,34,34,0.06)]">
+        <div className="border-b border-[#ECE6DD] px-6 py-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-[#222222]">Upload inbox</h2>
+              <p className="mt-1 text-sm text-[#333333]/58">
+                {summary.total} items tracked locally. Pending files and completed results stay in the same list.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={toggleSelectionMode}
+                disabled={items.length === 0 || hasUploading}
+                className={cn(
+                  "cursor-pointer rounded-2xl px-4 py-2 text-sm font-medium transition",
+                  selectionMode
+                    ? "bg-[#222222] text-white hover:bg-[#111111]"
+                    : "border border-[#E6E1DA] bg-white text-[#222222] hover:bg-[#F6F1EA]",
+                  (items.length === 0 || hasUploading) && "cursor-not-allowed opacity-45"
                 )}
-              </div>
-              <div className="flex items-center gap-2">
+              >
+                {selectionMode ? "Cancel selection" : "Select"}
+              </button>
+              <button
+                onClick={handleClearCompleted}
+                disabled={completedCount === 0 || hasUploading}
+                className={cn(
+                  "cursor-pointer rounded-2xl border px-4 py-2 text-sm font-medium transition",
+                  completedCount > 0 && !hasUploading
+                    ? "border-[#E6E1DA] bg-white text-[#222222] hover:bg-[#F6F1EA]"
+                    : "cursor-not-allowed border-[#EEE8DF] bg-[#F8F4EE] text-[#333333]/35"
+                )}
+              >
+                Clear completed
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {filters.map((option) => (
                 <button
-                  onClick={clearCompleted}
-                  className="px-3 py-1.5 text-sm text-[#333333]/60 hover:text-[#333333] transition-colors cursor-pointer"
+                  key={option.key}
+                  onClick={() => setFilter(option.key)}
+                  className={cn(
+                    "cursor-pointer rounded-full px-4 py-2 text-sm font-medium transition",
+                    filter === option.key
+                      ? "bg-[#222222] text-white"
+                      : "bg-[#F5F0E8] text-[#333333]/70 hover:bg-[#EBE4D9]"
+                  )}
                 >
-                  Clear completed
+                  {option.label} ({option.count})
+                </button>
+              ))}
+            </div>
+
+            <div className="text-sm text-[#333333]/55">
+              {isHydrated ? "Saved locally between refreshes." : "Restoring local queue..."}
+            </div>
+          </div>
+
+          {selectionMode && (
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-[#ECE6DD] bg-[#FAF7F2] px-4 py-3">
+              <button
+                onClick={toggleSelectAllVisible}
+                className="flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-[#222222] transition hover:bg-white"
+              >
+                <span
+                  className={cn(
+                    "flex h-5 w-5 items-center justify-center rounded border-2 transition",
+                    allVisibleSelected ? "border-[#222222] bg-[#222222] text-white" : "border-[#C8C0B4] bg-white"
+                  )}
+                >
+                  {allVisibleSelected && <Check className="h-3.5 w-3.5" />}
+                </span>
+                Select visible
+              </button>
+
+              <span className="text-sm text-[#333333]/60">{selectedIds.size} selected</span>
+              <span className="hidden h-4 w-px bg-[#E4DDD2] sm:block" />
+              <span className="text-sm text-[#333333]/60">{selectedReadyCount} ready to upload</span>
+
+              <div className="ml-auto flex flex-wrap gap-2">
+                <button
+                  onClick={handleUploadSelected}
+                  disabled={selectedReadyCount === 0 || isUploading}
+                  className={cn(
+                    "cursor-pointer rounded-xl px-4 py-2 text-sm font-medium transition",
+                    selectedReadyCount > 0 && !isUploading
+                      ? "bg-[#222222] text-white hover:bg-[#111111]"
+                      : "cursor-not-allowed bg-[#ECE5DA] text-[#333333]/35"
+                  )}
+                >
+                  Upload selected
                 </button>
                 <button
-                  onClick={uploadAllFiles}
-                  disabled={pendingCount === 0 || isUploading}
+                  onClick={() => removeItems(selectedIds)}
+                  disabled={selectedIds.size === 0 || hasUploading}
                   className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-xl font-medium transition-all cursor-pointer",
-                    pendingCount > 0 && !isUploading
-                      ? "bg-[#333333] text-white hover:bg-[#333333]/90"
-                      : "bg-[#E0E0E0] text-[#333333]/50 cursor-not-allowed"
+                    "cursor-pointer rounded-xl px-4 py-2 text-sm font-medium transition",
+                    selectedIds.size > 0 && !hasUploading
+                      ? "bg-rose-500 text-white hover:bg-rose-600"
+                      : "cursor-not-allowed bg-[#ECE5DA] text-[#333333]/35"
                   )}
                 >
-                  {isUploading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Uploading...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-4 h-4" />
-                      Upload All
-                    </>
-                  )}
+                  Remove selected
                 </button>
               </div>
             </div>
+          )}
+        </div>
 
-            {/* File List */}
-            <div className="divide-y divide-[#E0E0E0]">
-              <AnimatePresence>
-                {files.map((file, index) => {
-                  const StatusIcon = statusIcons[file.status];
-                  return (
-                    <motion.div
-                      key={file.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="flex items-center gap-4 p-4 hover:bg-[#333333]/5 transition-colors"
-                    >
-                      {/* Preview */}
-                      <div className="w-12 h-12 rounded-lg overflow-hidden bg-[#E0E0E0] flex-shrink-0">
-                        {file.preview ? (
-                          <img
-                            src={file.preview}
-                            alt={file.file.name}
-                            className="w-full h-full object-cover"
-                          />
+        {displayItems.length > 0 ? (
+          <div className="divide-y divide-[#F0EAE1]">
+            <AnimatePresence initial={false}>
+              {displayItems.map((item) => {
+                const StatusIcon = statusIcons[item.status];
+                const selected = selectedIds.has(item.id);
+                const canUploadThisItem = isUploadable(item) && !isUploading;
+
+                return (
+                  <motion.div
+                    key={item.id}
+                    layout
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    className={cn(
+                      "flex flex-col gap-4 px-6 py-5 transition-colors lg:flex-row lg:items-center",
+                      selected && "bg-[#FBF7F1]",
+                      !selected && "hover:bg-[#FCFAF7]"
+                    )}
+                  >
+                    <div className="flex items-start gap-4 lg:flex-1">
+                      {selectionMode && (
+                        <button
+                          onClick={() => toggleItemSelection(item.id)}
+                          className={cn(
+                            "mt-2 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border-2 transition",
+                            selected ? "border-[#222222] bg-[#222222] text-white" : "border-[#C8C0B4] bg-white"
+                          )}
+                        >
+                          {selected && <Check className="h-3.5 w-3.5" />}
+                        </button>
+                      )}
+
+                      <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-2xl border border-[#E7E0D7] bg-[#F3EEE7]">
+                        {item.preview ? (
+                          <img src={item.preview} alt={item.file_name} className="h-full w-full object-cover" />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <FileImage className="w-6 h-6 text-[#333333]/40" />
+                          <div className="flex h-full w-full items-center justify-center">
+                            <FileImage className="h-6 w-6 text-[#333333]/35" />
                           </div>
                         )}
                       </div>
 
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-[#333333] truncate">
-                          {file.file.name}
-                        </p>
-                        <p className="text-sm text-[#333333]/50">
-                          {formatFileSize(file.file.size)}
-                        </p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="truncate text-base font-medium text-[#222222]">{item.file_name}</p>
+                          {!item.file && item.status !== "success" && item.status !== "duplicated" && (
+                            <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
+                              File missing
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[#333333]/55">
+                          <span>{formatFileSize(item.file_size)}</span>
+                          <span>{item.file_type.replace("image/", "").toUpperCase() || "Image"}</span>
+                          <span>Updated {formatRelativeTime(item.updated_at)}</span>
+                        </div>
 
-                        {/* Progress Bar */}
-                        {file.status === "uploading" && (
-                          <div className="mt-2 h-1.5 bg-[#E0E0E0] rounded-full overflow-hidden">
+                        {item.status === "uploading" && (
+                          <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#EEE7DC]">
                             <motion.div
-                              className="h-full bg-[#333333]"
+                              className="h-full rounded-full bg-[#222222]"
                               initial={{ width: 0 }}
-                              animate={{ width: `${file.progress}%` }}
-                              transition={{ duration: 0.3 }}
+                              animate={{ width: `${item.progress}%` }}
+                              transition={{ duration: 0.25 }}
                             />
                           </div>
                         )}
 
-                        {/* Error Message */}
-                        {file.status === "failed" && file.result?.error_message && (
-                          <p className="text-sm text-red-500 mt-1">
-                            {file.result.error_message}
-                          </p>
+                        {item.result?.error_message && item.status === "failed" && (
+                          <p className="mt-2 text-sm text-rose-600">{item.result.error_message}</p>
                         )}
                       </div>
+                    </div>
 
-                      {/* Status Badge */}
+                    <div className="flex flex-wrap items-center gap-3 lg:justify-end">
                       <div
                         className={cn(
-                          "flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border",
-                          statusStyles[file.status]
+                          "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium",
+                          statusStyles[item.status]
                         )}
                       >
-                        {StatusIcon && (
-                          <StatusIcon
-                            className={cn(
-                              "w-4 h-4",
-                              file.status === "uploading" && "animate-spin"
-                            )}
-                          />
-                        )}
-                        {statusLabels[file.status]}
-                        {file.status === "uploading" && ` ${file.progress}%`}
+                        <StatusIcon className={cn("h-4 w-4", item.status === "uploading" && "animate-spin")} />
+                        <span>{statusLabels[item.status]}</span>
+                        {item.status === "uploading" && <span>{item.progress}%</span>}
                       </div>
 
-                      {/* Remove Button */}
-                      {!hasUploading && (
-                        <button
-                          onClick={() => removeFile(file.id)}
-                          className="p-1.5 text-[#333333]/40 hover:text-red-500 transition-colors cursor-pointer"
-                        >
-                          <X className="w-5 h-5" />
-                        </button>
+                      {!selectionMode && (
+                        <>
+                          {canUploadThisItem && (
+                            <button
+                              onClick={() => void uploadItemsByIds([item.id])}
+                              className="cursor-pointer rounded-xl border border-[#D8D0C4] px-3 py-2 text-sm font-medium text-[#222222] transition hover:bg-[#F6F1EA]"
+                            >
+                              Upload
+                            </button>
+                          )}
+                          <button
+                            onClick={() => removeItems([item.id])}
+                            disabled={hasUploading}
+                            className={cn(
+                              "cursor-pointer rounded-xl p-2 text-[#333333]/45 transition hover:bg-[#F6F1EA] hover:text-rose-500",
+                              hasUploading && "cursor-not-allowed opacity-35"
+                            )}
+                            aria-label={`Remove ${item.file_name}`}
+                          >
+                            <Trash2 className="h-4.5 w-4.5" />
+                          </button>
+                        </>
                       )}
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </div>
+        ) : (
+          <div className="px-6 py-16 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-[#F3EEE7] text-[#333333]/35">
+              <ImageIcon className="h-8 w-8" />
             </div>
-          </motion.div>
+            <h3 className="mt-5 text-lg font-semibold text-[#222222]">Nothing in this view</h3>
+            <p className="mt-2 text-sm text-[#333333]/55">
+              {items.length === 0
+                ? "Add images above to start building your persistent upload queue."
+                : "Change the filter or add more files to populate this list."}
+            </p>
+          </div>
         )}
-      </AnimatePresence>
-
-      {/* Upload History */}
-      {uploadHistory.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-card rounded-2xl overflow-hidden"
-        >
-          <div className="flex items-center justify-between p-4 border-b border-[#E0E0E0]">
-            <h2 className="font-medium text-[#333333]">Upload History</h2>
-            <button
-              onClick={() => {
-                setUploadHistory([]);
-                localStorage.removeItem("uploadHistory");
-              }}
-              className="text-sm text-[#333333]/60 hover:text-[#333333] transition-colors cursor-pointer"
-            >
-              Clear history
-            </button>
-          </div>
-
-          <div className="divide-y divide-[#E0E0E0] max-h-[400px] overflow-y-auto">
-            {uploadHistory.map((item, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: index * 0.03 }}
-                className="flex items-center gap-4 p-4 hover:bg-[#333333]/5 transition-colors"
-              >
-                {/* Icon */}
-                <div className="w-10 h-10 rounded-lg bg-[#E0E0E0] flex items-center justify-center flex-shrink-0">
-                  <ImageIcon className="w-5 h-5 text-[#333333]/40" />
-                </div>
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-[#333333] truncate">
-                    {item.file.name}
-                  </p>
-                  <p className="text-sm text-[#333333]/50">
-                    {formatFileSize(item.file.size)}
-                  </p>
-                </div>
-
-                {/* Status */}
-                <div
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border",
-                    statusStyles[item.result.status]
-                  )}
-                >
-                  {item.result.status === "success" && (
-                    <>
-                      <CheckCircle className="w-4 h-4" />
-                      Success
-                    </>
-                  )}
-                  {item.result.status === "duplicated" && (
-                    <>
-                      <AlertTriangle className="w-4 h-4" />
-                      Duplicate
-                    </>
-                  )}
-                  {item.result.status === "failed" && (
-                    <>
-                      <XCircle className="w-4 h-4" />
-                      Failed
-                    </>
-                  )}
-                </div>
-
-                {/* Time */}
-                <span className="text-sm text-[#333333]/40">
-                  {formatRelativeTime(item.timestamp)}
-                </span>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
-      )}
-
-      {/* Empty State */}
-      {files.length === 0 && uploadHistory.length === 0 && (
-        <div className="text-center py-12">
-          <div className="w-20 h-20 rounded-full bg-[#E0E0E0] flex items-center justify-center mx-auto mb-4">
-            <ImageIcon className="w-10 h-10 text-[#333333]/30" />
-          </div>
-          <p className="text-[#333333]/60">No images uploaded yet</p>
-          <p className="text-sm text-[#333333]/40 mt-1">
-            Drop images above or click to select files
-          </p>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

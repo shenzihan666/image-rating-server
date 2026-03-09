@@ -15,7 +15,12 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.logger import setup_logger
 from app.services.ai.bootstrap import register_builtin_models
-from app.services.ai.store import ensure_ai_models, restore_active_model
+from app.services.ai.store import (
+    ensure_ai_models,
+    restore_active_model,
+    sync_all_model_runtime_configs,
+)
+from app.services.ai.prompt_store import ensure_default_prompts
 
 
 @asynccontextmanager
@@ -33,6 +38,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from app.core.database import async_session_maker
         async with async_session_maker() as session:
             await ensure_ai_models(session)
+            await sync_all_model_runtime_configs(session)
+            await ensure_default_prompts(session)
             await restore_active_model(session)
     except Exception as e:
         logger.error(f"Database initialization error: {e}")

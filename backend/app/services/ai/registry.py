@@ -3,6 +3,7 @@ AI Model Registry - Manages available models and active model state
 """
 
 import asyncio
+
 from loguru import logger
 
 from app.services.ai.base import BaseAIAnalyzer
@@ -49,12 +50,13 @@ class AIModelRegistry:
             return False
 
     @classmethod
-    async def set_active(cls, name: str) -> bool:
+    async def set_active(cls, name: str, force_reload: bool = False) -> bool:
         """
         Set the active model. Only one model can be active at a time.
 
         Args:
             name: Name of the model to activate
+            force_reload: Whether to unload and reload the model even if already active
 
         Returns:
             True if activation was successful, False otherwise
@@ -64,13 +66,28 @@ class AIModelRegistry:
                 logger.warning(f"Model not found: {name}")
                 return False
 
+            previous_active = cls._active_model
+
             # Unload current active model if exists
-            if cls._active_model and cls._active_model != name:
-                logger.info(f"Unloading current active model: {cls._active_model}")
-                await cls._models[cls._active_model].unload()
+            if previous_active and previous_active != name:
+                logger.info(f"Unloading current active model: {previous_active}")
+                await cls._models[previous_active].unload()
+                cls._active_model = None
 
             # Load and set new active model
             model = cls._models[name]
+            if force_reload and model.is_loaded():
+                logger.info(f"Force reloading model: {name}")
+                await model.unload()
+                cls._active_model = None
+
+            if cls._active_model == name and model.is_loaded() and not force_reload:
+                logger.info(f"Model already active: {name}")
+                return True
+
+            if cls._active_model == name and not model.is_loaded():
+                cls._active_model = None
+
             if await model.load():
                 cls._active_model = name
                 logger.info(f"Activated AI model: {name}")
