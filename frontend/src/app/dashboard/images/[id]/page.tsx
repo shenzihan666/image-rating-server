@@ -84,11 +84,31 @@ export default function ImageDetailPage() {
   const fetchImage = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setAnalysisError(null);
     try {
       const response = await imageApi.getImage(imageId);
-      setImage(response.data);
-      setEditTitle(response.data.title);
-      setEditDescription(response.data.description || "");
+      const imageData = response.data;
+      setImage(imageData);
+      setEditTitle(imageData.title);
+      setEditDescription(imageData.description || "");
+
+      const hasSavedAnalysis =
+        Boolean(imageData.ai_analyzed_at) ||
+        (imageData.ai_score !== null && imageData.ai_score !== undefined);
+      if (hasSavedAnalysis) {
+        try {
+          const analysisResponse = await aiAnalyzeApi.getImageAnalysis(imageId);
+          setAnalysisResult(analysisResponse.data as AnalysisResult);
+        } catch (analysisErr) {
+          const analysisApiError = analysisErr as ApiError;
+          if (analysisApiError.status !== 404) {
+            setAnalysisError(analysisApiError.detail || "Failed to load saved analysis");
+          }
+          setAnalysisResult(null);
+        }
+      } else {
+        setAnalysisResult(null);
+      }
     } catch (err) {
       const apiError = err as ApiError;
       setError(apiError.detail || "Failed to load image");

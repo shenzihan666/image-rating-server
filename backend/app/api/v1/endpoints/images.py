@@ -1,6 +1,7 @@
 """
 Image management endpoints
 """
+import json
 import math
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from loguru import logger
 from app.api.deps import ActiveUser, get_db
 from app.core.config import settings
 from app.core.database import AsyncSession
+from app.schemas.analyze import ImageAnalyzeResponse
 from app.schemas.batch import BatchDeleteRequest, BatchDeleteResponse
 from app.schemas.image import ImageListResponse, ImageResponse, ImageUpdate
 from app.services.analysis_result import AnalysisResultService
@@ -79,9 +81,10 @@ async def list_images(
                 rating_count=img.rating_count,
                 created_at=img.created_at.isoformat(),
                 updated_at=img.updated_at.isoformat(),
-                ai_score=scores_map.get(img.id, (None, None, None))[0],
-                ai_model=scores_map.get(img.id, (None, None, None))[1],
-                ai_analyzed_at=scores_map.get(img.id, (None, None, None))[2],
+                ai_score=scores_map.get(img.id, (None, None, None, None))[0],
+                ai_model=scores_map.get(img.id, (None, None, None, None))[1],
+                ai_analyzed_at=scores_map.get(img.id, (None, None, None, None))[2],
+                ai_decision=scores_map.get(img.id, (None, None, None, None))[3],
             )
             for img in images
         ],
@@ -123,7 +126,7 @@ async def get_image(
 
     # Get latest AI score
     analysis_service = AnalysisResultService(db)
-    score, model, analyzed_at = await analysis_service.get_latest_score_for_image(image_id)
+    score, model, analyzed_at, decision = await analysis_service.get_latest_score_for_image(image_id)
 
     return ImageResponse(
         id=image.id,
@@ -143,6 +146,61 @@ async def get_image(
         ai_score=score,
         ai_model=model,
         ai_analyzed_at=analyzed_at,
+        ai_decision=decision,
+    )
+
+
+@router.get("/{image_id}/analysis", response_model=ImageAnalyzeResponse)
+async def get_image_analysis(
+    image_id: str,
+    current_user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ImageAnalyzeResponse:
+    """
+    Get the latest saved AI analysis for an image.
+
+    Args:
+        image_id: Image ID
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        ImageAnalyzeResponse with latest saved analysis
+
+    Raises:
+        HTTPException: If image or analysis result not found
+    """
+    image_service = ImageService(db)
+    image = await image_service.get_image(image_id, current_user["user_id"])
+
+    if not image:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Image not found",
+        )
+
+    analysis_service = AnalysisResultService(db)
+    latest = await analysis_service.get_latest(image_id)
+    if not latest:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Analysis result not found",
+        )
+
+    details = json.loads(latest.details) if latest.details else {}
+    if latest.prompt_version_id and "prompt" not in details:
+        details["prompt"] = {
+            "prompt_version_id": latest.prompt_version_id,
+            "prompt_name": latest.prompt_name,
+            "prompt_version_number": latest.prompt_version_number,
+        }
+
+    return ImageAnalyzeResponse(
+        image_id=image_id,
+        model=latest.model,
+        score=latest.score,
+        details=details,
+        created_at=latest.created_at.isoformat(),
     )
 
 
@@ -184,7 +242,7 @@ async def update_image(
 
     # Get latest AI score
     analysis_service = AnalysisResultService(db)
-    score, model, analyzed_at = await analysis_service.get_latest_score_for_image(image_id)
+    score, model, analyzed_at, decision = await analysis_service.get_latest_score_for_image(image_id)
 
     return ImageResponse(
         id=image.id,
@@ -204,6 +262,7 @@ async def update_image(
         ai_score=score,
         ai_model=model,
         ai_analyzed_at=analyzed_at,
+        ai_decision=decision,
     )
 
 

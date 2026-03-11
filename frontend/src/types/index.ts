@@ -1,4 +1,4 @@
-﻿/**
+/**
  * TypeScript type definitions for the application
  */
 
@@ -65,6 +65,7 @@ export interface Image {
   ai_score?: number | null;
   ai_model?: string | null;
   ai_analyzed_at?: string | null;
+  ai_decision?: string | null;
 }
 
 /**

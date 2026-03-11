@@ -147,6 +147,24 @@ async def update_model_config(
     return await _build_model_payload(record)
 
 
+async def test_model_connection(
+    db: AsyncSession,
+    name: str,
+) -> dict[str, Any] | None:
+    """Run a model-specific connection test using persisted configuration."""
+    result = await db.execute(select(AIModel).where(AIModel.name == name))
+    record = result.scalar_one_or_none()
+    if record is None:
+        return None
+
+    registry_model = await AIModelRegistry.get_model(name)
+    if registry_model is None:
+        return None
+
+    config = _deserialize_config(record.config_json)
+    return await registry_model.test_connection(config)
+
+
 async def set_active_model(db: AsyncSession, name: str) -> dict[str, Any]:
     """Set a model active in registry and database."""
     result = await db.execute(select(AIModel).where(AIModel.name == name))

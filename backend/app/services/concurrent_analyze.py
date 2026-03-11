@@ -130,7 +130,12 @@ class ConcurrentAnalyzeService:
                     return (image_id, response, None)
 
                 except Exception as e:
-                    logger.error(f"Error analyzing image {image_id}: {e}")
+                    logger.exception(
+                        "Error analyzing image {} with model {} in batch analyze: {}",
+                        image_id,
+                        model_name,
+                        e.__class__.__name__,
+                    )
                     return (image_id, None, str(e))
 
             # This should never be reached

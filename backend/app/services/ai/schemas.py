@@ -49,6 +49,18 @@ class AIModelDetail(AIModelInfo):
     )
 
 
+class AIModelConnectionTestResponse(BaseModel):
+    """Connection test result for a model."""
+
+    ok: bool = Field(..., description="Whether the connection test succeeded")
+    status: str = Field(..., description="Machine-readable connection test status")
+    message: str = Field(..., description="Human-readable test result")
+    details: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional structured details from the test run",
+    )
+
+
 class SetActiveModelRequest(BaseModel):
     """Request schema for setting the active model."""
 

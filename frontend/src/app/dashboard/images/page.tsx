@@ -15,28 +15,18 @@ import {
   Calendar,
   ChevronDown,
   CheckSquare,
-  Square,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { imageApi, batchAnalyzeApi, type ApiError } from "@/lib/api";
-import { getImageUrl } from "@/lib/image-url";
-import { cn, formatRelativeTime, formatFileSize } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { Image, BatchAnalyzeResponse, BatchDeleteResponse } from "@/types";
 
-const container = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: { staggerChildren: 0.05 },
-  },
-};
-
-const item = {
-  hidden: { opacity: 0, x: -20 },
-  show: { opacity: 1, x: 0 },
-};
+import { ImagesCardView } from "./_components/ImagesCardView";
+import { ImagesTableView } from "./_components/ImagesTableView";
 
 interface ImagesResponse {
   items: Image[];
@@ -71,6 +61,9 @@ export default function ImagesPage() {
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  // Layout: "card" (grid) or "table" (horizontal list). Default card per plan.
+  const [viewMode, setViewMode] = useState<"card" | "table">("card");
 
   const fetchImages = useCallback(async () => {
     setLoading(true);
@@ -172,7 +165,10 @@ export default function ImagesPage() {
       handleClearSelection();
     } catch (err) {
       const apiError = err as ApiError;
-      alert(apiError.detail || "Failed to analyze images");
+      const detail = apiError.detail?.toLowerCase().includes("timeout")
+        ? "Batch analyze request timed out in the browser. The backend may still be processing the images, so refresh in a moment to check the latest results."
+        : apiError.detail || "Failed to analyze images";
+      alert(detail);
     } finally {
       setBatchAnalyzing(false);
     }
@@ -271,6 +267,40 @@ export default function ImagesPage() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          {/* Card / Table layout toggle */}
+          <div className="flex rounded-xl border border-[#E0E0E0] bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode("card")}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                viewMode === "card"
+                  ? "bg-[#333333] text-white"
+                  : "text-[#333333]/70 hover:bg-[#E0E0E0]/50"
+              )}
+              aria-pressed={viewMode === "card"}
+              aria-label="Card view"
+            >
+              <LayoutGrid className="w-4 h-4" />
+              <span className="hidden sm:inline">Card</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                viewMode === "table"
+                  ? "bg-[#333333] text-white"
+                  : "text-[#333333]/70 hover:bg-[#E0E0E0]/50"
+              )}
+              aria-pressed={viewMode === "table"}
+              aria-label="Table view"
+            >
+              <List className="w-4 h-4" />
+              <span className="hidden sm:inline">Table</span>
+            </button>
+          </div>
+
           {/* Selection Mode Toggle */}
           <button
             onClick={toggleSelectionMode}
@@ -463,131 +493,23 @@ export default function ImagesPage() {
       {/* Images List */}
       {images.length > 0 ? (
         <>
-          <motion.div
-            variants={container}
-            initial="hidden"
-            animate="show"
-            className="space-y-3"
-          >
-            {images.map((image) => (
-              <motion.div
-                key={image.id}
-                variants={item}
-                whileHover={{ x: 4 }}
-                className={cn(
-                  "glass-card rounded-2xl overflow-hidden cursor-pointer card-hover transition-all",
-                  selectedIds.has(image.id) && "ring-2 ring-purple-600 ring-offset-2"
-                )}
-              >
-                <div className="flex items-center gap-4 p-3">
-                  {/* Checkbox (always visible in selection mode) */}
-                  {selectionMode && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleSelectImage(image.id);
-                      }}
-                      className={cn(
-                        "w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors flex-shrink-0 cursor-pointer",
-                        selectedIds.has(image.id)
-                          ? "bg-purple-600 border-purple-600"
-                          : "border-[#333333]/30 hover:border-purple-600"
-                      )}
-                    >
-                      {selectedIds.has(image.id) && (
-                        <Check className="w-4 h-4 text-white" />
-                      )}
-                    </button>
-                  )}
-
-                  {/* Thumbnail */}
-                  <div
-                    className="w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0 bg-[#E0E0E0] rounded-xl overflow-hidden"
-                    onClick={() => {
-                      if (selectionMode) {
-                        handleSelectImage(image.id);
-                      } else {
-                        router.push(`/dashboard/images/${image.id}`);
-                      }
-                    }}
-                  >
-                    <img
-                      src={getImageUrl(image.file_path)}
-                      alt={image.title}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  </div>
-
-                  {/* Info */}
-                  <div
-                    className="flex-1 min-w-0"
-                    onClick={() => {
-                      if (selectionMode) {
-                        handleSelectImage(image.id);
-                      } else {
-                        router.push(`/dashboard/images/${image.id}`);
-                      }
-                    }}
-                  >
-                    <h3 className="font-medium text-[#333333] truncate">
-                      {image.title}
-                    </h3>
-                    <div className="flex flex-wrap items-center gap-3 mt-1.5 text-sm text-[#333333]/50">
-                      {image.width && image.height && (
-                        <span className="flex items-center gap-1">
-                          <span className="w-3 h-3 rounded-sm bg-[#333333]/10"></span>
-                          {image.width} × {image.height}
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1">
-                        <span className="text-xs">📦</span>
-                        {formatFileSize(image.file_size)}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="text-xs">📅</span>
-                        {formatRelativeTime(image.created_at)}
-                      </span>
-                      {image.ai_score && (
-                        <span className="flex items-center gap-1 text-purple-600">
-                          <Sparkles className="w-3 h-3" />
-                          {image.ai_score.toFixed(2)}
-                        </span>
-                      )}
-                      {image.rating_count > 0 && !image.ai_score && (
-                        <span className="flex items-center gap-1 text-amber-600">
-                          <span>★</span>
-                          {image.average_rating.toFixed(1)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Arrow */}
-                  {!selectionMode && (
-                    <div
-                      className="text-[#333333]/30"
-                      onClick={() => router.push(`/dashboard/images/${image.id}`)}
-                    >
-                      <svg
-                        className="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 5l7 7-7 7"
-                        />
-                      </svg>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
+          {viewMode === "table" ? (
+            <ImagesTableView
+              images={images}
+              selectedIds={selectedIds}
+              selectionMode={selectionMode}
+              onSelectImage={handleSelectImage}
+              onOpenDetail={(id) => router.push(`/dashboard/images/${id}`)}
+            />
+          ) : (
+            <ImagesCardView
+              images={images}
+              selectedIds={selectedIds}
+              selectionMode={selectionMode}
+              onSelectImage={handleSelectImage}
+              onOpenDetail={(id) => router.push(`/dashboard/images/${id}`)}
+            />
+          )}
 
           {/* Pagination */}
           {totalPages > 1 && (

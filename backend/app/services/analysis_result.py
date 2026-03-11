@@ -114,11 +114,25 @@ class AnalysisResultService:
 
         return count
 
+    @staticmethod
+    def _extract_decision(record: AnalysisResult) -> str | None:
+        """Extract AI decision string from analysis details JSON."""
+        if not record.details:
+            return None
+        try:
+            details = json.loads(record.details)
+            result_obj = details.get("result")
+            if isinstance(result_obj, dict):
+                return result_obj.get("decision")
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return None
+
     async def get_scores_for_images(
         self,
         image_ids: list[str],
         model: str | None = None,
-    ) -> dict[str, tuple[float | None, str | None, str | None]]:
+    ) -> dict[str, tuple[float | None, str | None, str | None, str | None]]:
         """
         Get the latest AI scores for multiple images.
 
@@ -127,13 +141,12 @@ class AnalysisResultService:
             model: Optional model name filter
 
         Returns:
-            Dictionary mapping image_id to (score, model, analyzed_at) tuple
+            Dictionary mapping image_id to (score, model, analyzed_at, decision) tuple
         """
         if not image_ids:
             return {}
 
-        # For each image, get the latest result
-        result_map: dict[str, tuple[float | None, str | None, str | None]] = {}
+        result_map: dict[str, tuple[float | None, str | None, str | None, str | None]] = {}
 
         for image_id in image_ids:
             latest = await self.get_latest(image_id, model)
@@ -142,16 +155,17 @@ class AnalysisResultService:
                     latest.score,
                     latest.model,
                     latest.created_at.isoformat() if latest.created_at else None,
+                    self._extract_decision(latest),
                 )
             else:
-                result_map[image_id] = (None, None, None)
+                result_map[image_id] = (None, None, None, None)
 
         return result_map
 
     async def get_latest_score_for_image(
         self,
         image_id: str,
-    ) -> tuple[float | None, str | None, str | None]:
+    ) -> tuple[float | None, str | None, str | None, str | None]:
         """
         Get the latest score for a single image.
 
@@ -159,7 +173,7 @@ class AnalysisResultService:
             image_id: ID of the image
 
         Returns:
-            Tuple of (score, model, analyzed_at) or (None, None, None)
+            Tuple of (score, model, analyzed_at, decision) or (None, None, None, None)
         """
         result = await self.get_latest(image_id)
         if result:
@@ -167,5 +181,6 @@ class AnalysisResultService:
                 result.score,
                 result.model,
                 result.created_at.isoformat() if result.created_at else None,
+                self._extract_decision(result),
             )
-        return (None, None, None)
+        return (None, None, None, None)

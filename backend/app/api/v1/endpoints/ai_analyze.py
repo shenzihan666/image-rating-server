@@ -18,6 +18,7 @@ from app.models.image import Image
 from app.schemas.analyze import ImageAnalyzeRequest, ImageAnalyzeResponse
 from app.schemas.batch import BatchAnalyzeRequest, BatchAnalyzeResponse
 from app.services.ai import (
+    AIModelConnectionTestResponse,
     AIModelDetail,
     AIModelInfo,
     SetActiveModelRequest,
@@ -30,6 +31,7 @@ from app.services.ai.store import (
     get_model_detail,
     list_models,
     set_active_model,
+    test_model_connection,
     update_model_config,
 )
 from app.services.analysis_result import AnalysisResultService
@@ -144,8 +146,26 @@ async def update_model_config_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model not found: {model_name}",
-        )
+    )
     return AIModelDetail(**model)
+
+
+@router.post(
+    "/models/{model_name}/test-connection",
+    response_model=AIModelConnectionTestResponse,
+)
+async def test_model_connection_endpoint(
+    model_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AIModelConnectionTestResponse:
+    """Test connectivity for a configured model without activating it."""
+    result = await test_model_connection(db, model_name)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model not found: {model_name}",
+        )
+    return AIModelConnectionTestResponse(**result)
 
 
 @router.delete("/models/active", status_code=status.HTTP_200_OK)
@@ -232,7 +252,10 @@ async def analyze_image(
 
     # Verify user owns the image
     result = await db.execute(
-        select(Image).where(Image.id == image_id)
+        select(Image).where(
+            Image.id == image_id,
+            Image.user_id == current_user["user_id"],
+        )
     )
     image = result.scalar_one_or_none()
 
@@ -316,7 +339,12 @@ async def analyze_image(
             created_at=datetime.utcnow().isoformat(),
         )
     except Exception as e:
-        logger.error(f"Analysis failed for image {image_id}: {e}")
+        logger.exception(
+            "Analysis failed for image {} with model {}: {}",
+            image_id,
+            model.name,
+            e.__class__.__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Analysis failed: {str(e)}",

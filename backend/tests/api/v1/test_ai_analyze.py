@@ -6,12 +6,15 @@ import sys
 import types
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.services.ai.models.qwen_vl.analyzer as qwen_analyzer_module
+from app.core.config import settings
 from app.core.database import Base, async_session_maker, engine
 from app.core.security import create_access_token, hash_password
 from app.models.ai_model import AIModel
@@ -19,7 +22,6 @@ from app.models.ai_prompt import AIPrompt, AIPromptVersion
 from app.models.analysis_result import AnalysisResult
 from app.models.image import Image
 from app.models.user import User
-from app.core.config import settings
 from app.services.ai.models.qwen_vl import QwenVLAnalyzer
 from app.services.ai.registry import AIModelRegistry
 
@@ -194,6 +196,105 @@ async def test_batch_analyze_route_is_not_captured_by_single_image_route(
 
     assert response.status_code == 400
     assert response.json()["detail"] == "No active AI model. Please activate a model first."
+
+
+@pytest.mark.asyncio
+async def test_get_image_analysis_returns_latest_saved_result(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+    test_image: Image,
+) -> None:
+    """
+    GET /api/v1/images/{image_id}/analysis should return the latest saved result.
+    """
+    db_session.add(
+        AnalysisResult(
+            id=str(uuid4()),
+            image_id=test_image.id,
+            model="qwen3-vl",
+            score=8.2,
+            details=json.dumps({"result": {"label": "excellent"}}),
+            prompt_version_id="prompt-version-2",
+            prompt_name="Quality Prompt",
+            prompt_version_number=2,
+        )
+    )
+    await db_session.commit()
+
+    response = await async_client.get(
+        f"/api/v1/images/{test_image.id}/analysis",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["image_id"] == test_image.id
+    assert payload["model"] == "qwen3-vl"
+    assert payload["score"] == 8.2
+    assert payload["details"]["result"]["label"] == "excellent"
+    assert payload["details"]["prompt"]["prompt_version_id"] == "prompt-version-2"
+
+
+@pytest.mark.asyncio
+async def test_get_image_analysis_returns_404_when_missing(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+    test_image: Image,
+) -> None:
+    """
+    GET /api/v1/images/{image_id}/analysis should return 404 when no result exists.
+    """
+    response = await async_client.get(
+        f"/api/v1/images/{test_image.id}/analysis",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Analysis result not found"
+
+
+@pytest.mark.asyncio
+async def test_analyze_image_returns_404_for_non_owner(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+    temp_upload_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    POST /api/v1/ai/analyze/{image_id} should not allow analyzing another user's image.
+    """
+    image_path = temp_upload_dir / "other-user.jpg"
+    image_path.write_bytes(b"other-user-image")
+    other_user_image = Image(
+        id="ai-other-user-image-id",
+        user_id="other-user-id",
+        title="Other user image",
+        description="Belongs to someone else",
+        file_path="other-user.jpg",
+        file_size=image_path.stat().st_size,
+        width=100,
+        height=100,
+        mime_type="image/jpeg",
+        hash_sha256="other-user-hash",
+    )
+    db_session.add(other_user_image)
+    await db_session.commit()
+
+    async def fake_get_active() -> FakeAnalyzer:
+        return FakeAnalyzer()
+
+    monkeypatch.setattr(AIModelRegistry, "get_active", fake_get_active)
+
+    response = await async_client.post(
+        f"/api/v1/ai/analyze/{other_user_image.id}",
+        headers=auth_headers,
+        json={"force_new": True},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Image not found"
 
 
 @pytest.mark.asyncio
@@ -390,6 +491,158 @@ async def test_get_model_detail_uses_env_defaults_for_qwen_configuration(
 
 
 @pytest.mark.asyncio
+async def test_test_connection_endpoint_reports_success_for_qwen(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    reset_ai_registry: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    POST /api/v1/ai/models/{model_name}/test-connection should verify qwen
+    provider connectivity using persisted configuration.
+    """
+    analyzer = QwenVLAnalyzer()
+    await AIModelRegistry.register(analyzer)
+
+    db_session.add(
+        AIModel(
+            name="qwen3-vl",
+            description=analyzer.description,
+            is_active=False,
+            config_json=json.dumps(
+                {
+                    "api_key": "configured-secret",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "model_name": "qwen3-vl-plus",
+                }
+            ),
+        )
+    )
+    await db_session.commit()
+
+    class FakeModels:
+        def list(self):
+            return types.SimpleNamespace(
+                data=[
+                    types.SimpleNamespace(id="qwen3-vl-plus"),
+                    types.SimpleNamespace(id="qwen-max"),
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str, base_url: str, timeout: float) -> None:
+            assert api_key == "configured-secret"
+            assert base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            assert timeout == 10.0
+            self.models = FakeModels()
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+
+    response = await async_client.post("/api/v1/ai/models/qwen3-vl/test-connection")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["status"] == "ok"
+    assert payload["details"]["model_name"] == "qwen3-vl-plus"
+
+
+@pytest.mark.asyncio
+async def test_test_connection_endpoint_reports_missing_qwen_config(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    reset_ai_registry: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    POST /api/v1/ai/models/{model_name}/test-connection should report missing
+    configuration instead of raising when qwen credentials are absent.
+    """
+    monkeypatch.setattr(settings, "QWEN3_VL_API_KEY", None)
+    monkeypatch.setattr(settings, "QWEN3_VL_BASE_URL", None)
+    monkeypatch.setattr(settings, "QWEN3_VL_MODEL_NAME", None)
+
+    analyzer = QwenVLAnalyzer()
+    await AIModelRegistry.register(analyzer)
+
+    db_session.add(
+        AIModel(
+            name="qwen3-vl",
+            description=analyzer.description,
+            is_active=False,
+        )
+    )
+    await db_session.commit()
+
+    response = await async_client.post("/api/v1/ai/models/qwen3-vl/test-connection")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["status"] == "not_configured"
+    assert payload["details"]["missing_fields"] == ["api_key"]
+
+
+@pytest.mark.asyncio
+async def test_test_connection_endpoint_reports_diagnostic_details_on_qwen_error(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    reset_ai_registry: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Connection test failures should expose exception metadata that can identify
+    the transport layer failure without leaking secrets.
+    """
+    analyzer = QwenVLAnalyzer()
+    await AIModelRegistry.register(analyzer)
+
+    db_session.add(
+        AIModel(
+            name="qwen3-vl",
+            description=analyzer.description,
+            is_active=False,
+            config_json=json.dumps(
+                {
+                    "api_key": "configured-secret",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "model_name": "qwen3-vl-plus",
+                }
+            ),
+        )
+    )
+    await db_session.commit()
+
+    class FakeModels:
+        def list(self):
+            try:
+                raise OSError("tls handshake EOF")
+            except OSError as inner:
+                raise RuntimeError("Connection error.") from inner
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str, base_url: str, timeout: float) -> None:
+            assert api_key == "configured-secret"
+            assert base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            assert timeout == 10.0
+            self.models = FakeModels()
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+
+    response = await async_client.post("/api/v1/ai/models/qwen3-vl/test-connection")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["status"] == "error"
+    assert payload["details"]["error_type"] == "RuntimeError"
+    assert payload["details"]["error_message"] == "Connection error."
+    assert payload["details"]["cause_chain"][0]["type"] == "RuntimeError"
+    assert payload["details"]["cause_chain"][1]["type"] == "OSError"
+    assert payload["details"]["cause_chain"][1]["message"] == "tls handshake EOF"
+
+
+@pytest.mark.asyncio
 async def test_qwen_analyzer_uses_active_prompt_version(
     db_session: AsyncSession,
     temp_upload_dir: Path,
@@ -454,3 +707,74 @@ async def test_qwen_analyzer_uses_active_prompt_version(
     assert messages[0]["content"] == "Managed system prompt"
     user_parts = messages[1]["content"]
     assert user_parts[0]["text"] == "Analyze prompted.jpg with qwen3-vl-plus as image/jpeg"
+
+
+@pytest.mark.asyncio
+async def test_qwen_analyzer_logs_diagnostic_context_on_analyze_failure(
+    db_session: AsyncSession,
+    temp_upload_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Analyze failures should emit structured diagnostics including image metadata
+    and the nested exception chain.
+    """
+    image_path = temp_upload_dir / "failing.jpg"
+    image_path.write_bytes(b"diagnostic-image-bytes")
+
+    class FakeLogger:
+        def __init__(self) -> None:
+            self.info_calls: list[tuple[str, tuple[object, ...]]] = []
+            self.exception_calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def info(self, message: str, *args: object) -> None:
+            self.info_calls.append((message, args))
+
+        def exception(self, message: str, *args: object) -> None:
+            self.exception_calls.append((message, args))
+
+        def warning(self, message: str, *args: object) -> None:
+            return None
+
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(qwen_analyzer_module, "logger", fake_logger)
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            try:
+                raise OSError("socket closed by peer")
+            except OSError as inner:
+                raise RuntimeError("Connection error.") from inner
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str, base_url: str) -> None:
+            assert api_key == "runtime-secret"
+            assert base_url == "https://example.com/v1"
+            self.chat = types.SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+
+    analyzer = QwenVLAnalyzer()
+    await analyzer.on_config_updated(
+        {
+            "api_key": "runtime-secret",
+            "base_url": "https://example.com/v1",
+            "model_name": "qwen3-vl-plus",
+        }
+    )
+    assert await analyzer.load() is True
+
+    with pytest.raises(RuntimeError, match="Connection error."):
+        await analyzer.analyze(str(image_path))
+
+    assert fake_logger.exception_calls
+    _, args = fake_logger.exception_calls[0]
+    context = json.loads(str(args[0]))
+    assert context["base_url"] == "https://example.com/v1"
+    assert context["configured_model_name"] == "qwen3-vl-plus"
+    assert context["image_name"] == "failing.jpg"
+    assert context["image_size_bytes"] == len(b"diagnostic-image-bytes")
+    assert context["error_type"] == "RuntimeError"
+    assert context["cause_chain"][0]["type"] == "RuntimeError"
+    assert context["cause_chain"][1]["type"] == "OSError"
+    assert context["cause_chain"][1]["message"] == "socket closed by peer"

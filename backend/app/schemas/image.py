@@ -50,6 +50,7 @@ class ImageResponse(BaseModel):
     ai_score: float | None = Field(None, description="Latest AI analysis score")
     ai_model: str | None = Field(None, description="AI model used for analysis")
     ai_analyzed_at: str | None = Field(None, description="Analysis timestamp")
+    ai_decision: str | None = Field(None, description="AI decision: 合格 or 不合格")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

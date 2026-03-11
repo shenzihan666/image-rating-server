@@ -168,3 +168,21 @@ class BaseAIAnalyzer(ABC):
     async def on_config_updated(self, config: dict[str, Any] | None) -> None:
         """Hook invoked after configuration is loaded from the database."""
         return None
+
+    async def test_connection(self, config: dict[str, Any] | None) -> dict[str, Any]:
+        """Test connectivity for models that rely on external providers."""
+        missing_fields = self.get_missing_required_fields(config)
+        if missing_fields:
+            return {
+                "ok": False,
+                "status": "not_configured",
+                "message": f"Missing required configuration: {', '.join(missing_fields)}",
+                "details": {"missing_fields": missing_fields},
+            }
+
+        return {
+            "ok": False,
+            "status": "not_supported",
+            "message": "Connection testing is not supported for this model.",
+            "details": {},
+        }

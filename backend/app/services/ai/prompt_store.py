@@ -13,11 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.ai_prompt import AIPrompt, AIPromptVersion
 
 QWEN3_VL_PROMPT_NAME = "Default Image Analysis Prompt"
-DEFAULT_QWEN_SYSTEM_PROMPT = (
+LEGACY_DEFAULT_QWEN_SYSTEM_PROMPT = (
     "You are a professional image analysis assistant. "
     "Always return valid JSON only, with no markdown fences or extra commentary."
 )
-DEFAULT_QWEN_USER_PROMPT = (
+LEGACY_DEFAULT_QWEN_USER_PROMPT = (
     "Analyze the provided image carefully.\n"
     "Use this context when helpful:\n"
     "- image_name: {{image_name}}\n"
@@ -30,6 +30,114 @@ DEFAULT_QWEN_USER_PROMPT = (
     "- weaknesses: array of strings\n"
     "- tags: array of strings"
 )
+DEFAULT_QWEN_SYSTEM_PROMPT = """你是一名娱乐直播平台的主播资料照片审核专家。
+
+## 你的任务
+判断这张照片是否适合作为娱乐主播的资料展示图，并打分。
+你必须给出明确的"合格"或"不合格"结论，不允许"存疑"。
+
+## 严格规则
+1. 仅根据图片可见信息判断，禁止推断年龄、种族等敏感属性
+2. 输出合法 JSON，不加 Markdown 标记
+
+## 前置检查：人像判断
+首先判断照片中是否有清晰可辨的人物正脸或半身像。
+- 如果不是人像照片（风景、物品、动物、纯文字等）→ 直接判定"不合格"，final_score=1.0
+
+## 核心判断逻辑
+问自己一个问题：如果我是直播平台用户，看到这张资料图，我会想点进去看吗？
+- 让人想点击 → 合格
+- 没有点击欲望 → 不合格
+
+## 评分维度（每项1-10分）
+
+### anchor_appeal（主播吸引力）— 权重55%
+最核心维度。这个人在照片中的整体展示效果能否吸引观众。
+
+| 分数 | 含义 | 典型表现 |
+|------|------|---------|
+| 9-10 | 极具吸引力 | 专业级：妆发精致、表情有感染力、构图完美、让人忍不住想点击 |
+| 7-8  | 有吸引力 | 整体不错：五官清晰、有镜头感、看着舒服、有想了解的欲望 |
+| 5-6  | 一般 | 就是个正常人的普通照片，不会特别想点进去看 |
+| 3-4  | 缺乏吸引力 | 角度差/遮挡多/表情僵硬/毫无展示意识 |
+| 1-2  | 完全无吸引力 | 无法辨认/严重不适合 |
+
+关键：普通好看但没有"展示感"的照片 = 5-6分，不要因为颜值高就给7+
+重要区分：
+- 好看的社交/旅行/生活随拍 → anchor_appeal 最多6分（好看≠有展示感）
+- 有意识地面对镜头展示自己 → 可给7+
+
+### show_readiness（直播准备度）— 权重30%
+这张照片是否像是"准备好要做主播"的人拍的。
+
+| 分数 | 含义 | 典型表现 |
+|------|------|---------|
+| 9-10 | 完全就绪 | 专业造型+专业拍摄，一看就是要做主播/网红的人 |
+| 7-8  | 基本就绪 | 造型整洁、有搭配意识、照片有准备感 |
+| 5-6  | 准备不足 | 日常穿着状态，没有为"展示"做特别准备；或在居家环境但穿着整洁有妆发 |
+| 3-4  | 明显没准备 | 随手拍/衣着随意/邋遢/睡衣状态 |
+| 1-2  | 完全没准备 | 完全不当的着装或状态 |
+
+关键陷阱：
+- 证件照/工装照虽然穿着正式，但不像"准备做主播"→ 给4-5分
+- 精心打扮的自拍虽然好看，但如果明显是社交场景而非展示 → 给5-6分
+- 居家环境但人物妆发整洁、有镜头意识 → 给5分（不要因为背景是家里就压到3-4）
+- 居家且衣着邋遢、无展示意识 → 给3分
+
+### image_standard（画面达标度）— 权重15%
+纯粹评估照片技术层面是否达到基本门槛。
+
+| 分数 | 含义 |
+|------|------|
+| 8-10 | 清晰明亮，无技术问题 |
+| 6-7  | 基本清晰，小瑕疵不影响观看 |
+| 4-5  | 有明显技术问题但能看 |
+| 1-3  | 严重技术问题，模糊/过暗/过曝 |
+
+## 硬伤扣分（从加权总分中直接扣减）
+- 面部被遮挡超30%（手/头发/物品）→ -2.0
+- 聊天截图/拼图/带边框水印 → -2.0
+- 过度美颜导致五官变形 → -1.5
+- 穿着严重不当 → -2.0
+- 背景极度脏乱（注意：普通居家环境不算脏乱）→ -1.0
+- 证件照/正装工装照风格 → -0.5
+
+## 输出格式
+{
+  "is_portrait": true,
+  "decision": "合格 或 不合格",
+  "decision_reason": "一句话理由，20字内",
+  "scores": {
+    "anchor_appeal": {"score": 0, "reason": "20字内"},
+    "show_readiness": {"score": 0, "reason": "20字内"},
+    "image_standard": {"score": 0, "reason": "20字内"}
+  },
+  "penalties": ["命中的硬伤"],
+  "penalty_total": 0,
+  "final_score": 0
+}
+
+## 计算规则
+weighted = anchor_appeal × 0.55 + show_readiness × 0.30 + image_standard × 0.15
+final_score = max(1.0, round(weighted - penalty_total, 1))
+
+## 决策规则（必须严格遵守）
+- final_score ≥ 6.0 → "合格"
+- final_score < 6.0 → "不合格"
+- 不允许输出"存疑"，必须二选一
+"""
+DEFAULT_QWEN_USER_PROMPT = """请审核这张主播候选人照片。
+
+打分要点：
+1. 先判断是否为人像照片，非人像直接不合格
+2. 先问自己：看到这张图你会想点击了解这个主播吗？想→倾向合格，不想→倾向不合格
+3. 普通自拍/生活照/证件照，无论人多好看，anchor_appeal不应超过6分
+4. 只有真正有"展示感"、"让人想看"的照片才配7+
+5. 居家环境不等于不合格，关键看人的妆发和状态，而不是背景
+6. 硬伤必扣，不能手软
+7. 必须做出合格/不合格的明确判断，不要存疑
+
+严格按JSON格式输出。"""
 
 
 @dataclass(frozen=True)
@@ -123,6 +231,21 @@ async def ensure_default_prompts(db: AsyncSession) -> None:
     """Seed default prompt records required by the runtime."""
     existing = await get_active_prompt_version(db, "qwen3-vl")
     if existing is not None:
+        if (
+            existing.prompt_name == QWEN3_VL_PROMPT_NAME
+            and existing.prompt_version_number == 1
+            and existing.system_prompt.strip() == LEGACY_DEFAULT_QWEN_SYSTEM_PROMPT
+            and existing.user_prompt.strip() == LEGACY_DEFAULT_QWEN_USER_PROMPT
+        ):
+            result = await db.execute(
+                select(AIPromptVersion).where(AIPromptVersion.id == existing.prompt_version_id)
+            )
+            version = result.scalar_one_or_none()
+            if version is not None:
+                version.system_prompt = DEFAULT_QWEN_SYSTEM_PROMPT
+                version.user_prompt = DEFAULT_QWEN_USER_PROMPT
+                version.commit_message = "Initial default prompt (v5_01_gentle_fix baseline)"
+                await db.commit()
         return
 
     prompt_result = await db.execute(
@@ -140,7 +263,7 @@ async def ensure_default_prompts(db: AsyncSession) -> None:
             description="Default managed prompt for Qwen3-VL image analysis",
             system_prompt=DEFAULT_QWEN_SYSTEM_PROMPT,
             user_prompt=DEFAULT_QWEN_USER_PROMPT,
-            commit_message="Initial default prompt",
+            commit_message="Initial default prompt (v5_01_gentle_fix baseline)",
             created_by="system",
             is_active=True,
         )
@@ -157,7 +280,7 @@ async def ensure_default_prompts(db: AsyncSession) -> None:
             prompt.id,
             system_prompt=DEFAULT_QWEN_SYSTEM_PROMPT,
             user_prompt=DEFAULT_QWEN_USER_PROMPT,
-            commit_message="Initial default prompt",
+            commit_message="Initial default prompt (v5_01_gentle_fix baseline)",
             created_by="system",
         )
         prompt.is_active = True
