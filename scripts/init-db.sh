@@ -29,6 +29,17 @@ if ! command -v uv &> /dev/null; then
 fi
 
 # Run database initialization
+if [ ! -f "$BACKEND_DIR/.env" ]; then
+    echo -e "${YELLOW}No backend/.env found. Creating from .env.example...${NC}"
+    cp "$BACKEND_DIR/.env.example" "$BACKEND_DIR/.env"
+fi
+
+if ! grep -Eq '^SECRET_KEY=.+' "$BACKEND_DIR/.env"; then
+    echo -e "${RED}SECRET_KEY is missing in backend/.env.${NC}"
+    echo "Set SECRET_KEY first, then re-run ./init-db.sh"
+    exit 1
+fi
+
 echo -e "${YELLOW}Initializing database...${NC}"
 uv run python -m app.db.init_db
 

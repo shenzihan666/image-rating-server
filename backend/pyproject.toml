@@ -27,7 +27,8 @@ dependencies = [
     "torchvision>=0.15.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     "pillow>=10.0.0",
     "opencv-python>=4.8.0",
-    "numpy>=1.24.0",
+    "numpy>=1.24.0,<2.0.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "numpy>=1.24.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     "aiofiles>=24.1.0",
     "openai>=2.26.0",
 ]
