@@ -73,12 +73,23 @@ image-rating-server/
 
 ## Getting Started
 
-### Prerequisites
+### Prerequisites (macOS)
 
+- macOS 13+ (Intel or Apple Silicon)
+- Homebrew
 - Python 3.11+
 - Node.js 18+
-- npm or yarn
-- uv (Python package manager) - Install with: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- uv (Python package manager)
+
+Install runtime dependencies on macOS:
+
+```bash
+brew update
+brew install python@3.11 node uv
+python3 --version
+node --version
+uv --version
+```
 
 ### Installation
 
@@ -102,6 +113,21 @@ image-rating-server/
    cp .env.local.example .env.local  # Edit with your configuration
    npm run build  # Optional: Build for production
    ```
+
+### Backend Python Dependency Groups
+
+Main dependencies are declared in `backend/pyproject.toml`:
+
+- API framework: `fastapi`, `uvicorn[standard]`, `pydantic`, `pydantic-settings`
+- Auth & security: `python-jose[cryptography]`, `bcrypt`, `email-validator`, `python-multipart`
+- Data & storage: `sqlalchemy`, `alembic`, `aiosqlite`, `python-dotenv`, `loguru`
+- Image & AI: `torch`, `torchvision`, `opencv-python`, `pillow`, `numpy`, `openai`
+- Utilities: `click`, `aiofiles`
+
+Development-only dependencies:
+
+- Test: `pytest`, `pytest-asyncio`, `httpx`
+- Quality: `black`, `ruff`, `mypy`, `types-aiofiles`
 
 ### Running the Application
 

@@ -15,6 +15,10 @@ sqlalchemy>=2.0.36
 alembic>=1.14.0
 aiosqlite>=0.20.0
 openai>=2.26.0
+torch>=2.0.0,<2.3.0; sys_platform == "darwin" and platform_machine == "x86_64"
+torch>=2.0.0; sys_platform != "darwin" or platform_machine != "x86_64"
+torchvision>=0.15.0,<0.18.0; sys_platform == "darwin" and platform_machine == "x86_64"
+torchvision>=0.15.0; sys_platform != "darwin" or platform_machine != "x86_64"
 
 # Development dependencies
 pytest>=8.0.0
