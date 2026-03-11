@@ -1,5 +1,14 @@
 # Development Commands
 
+## macOS Bootstrap
+
+Install runtime dependencies with Homebrew:
+
+```bash
+brew update
+brew install python@3.11 node uv
+```
+
 ## Backend
 
 Run these from `backend/`:
