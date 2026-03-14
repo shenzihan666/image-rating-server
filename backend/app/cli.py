@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,15 @@ import httpx
 
 DEFAULT_BASE_URL = "http://localhost:8080"
 DEFAULT_TIMEOUT_SECONDS = 30.0
+
+# Supported image MIME types for validation
+SUPPORTED_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+}
 
 
 @dataclass(slots=True)
@@ -70,6 +80,23 @@ class ApiClient:
     ) -> Any:
         url = f"{self._normalize_base_url(self.ctx.base_url)}{path}"
         headers = self._headers(require_auth)
+
+        # Keep verbose diagnostics off stdout so --json remains machine-readable.
+        if self.ctx.verbose:
+            click.echo(f"[VERBOSE] {method} {url}", err=True)
+            if params:
+                click.echo(f"[VERBOSE] Params: {params}", err=True)
+            if json_body:
+                click.echo(
+                    f"[VERBOSE] Body: {json.dumps(json_body, ensure_ascii=False)}",
+                    err=True,
+                )
+            if data:
+                click.echo(f"[VERBOSE] Form data: {data}", err=True)
+            if files:
+                file_names = [f[1][0] for f in files]
+                click.echo(f"[VERBOSE] Files: {file_names}", err=True)
+
         try:
             with httpx.Client(timeout=timeout or self.ctx.timeout) as client:
                 response = client.request(
@@ -83,6 +110,10 @@ class ApiClient:
                 )
         except httpx.RequestError as exc:
             raise CLIError(f"Network error: {exc}", 11) from exc
+
+        # Keep verbose diagnostics off stdout so --json remains machine-readable.
+        if self.ctx.verbose:
+            click.echo(f"[VERBOSE] Response: {response.status_code}", err=True)
 
         if response.status_code >= 400:
             detail = _extract_error_detail(response)
@@ -402,14 +433,14 @@ def images_list(
     date_from: str | None,
     date_to: str | None,
 ) -> None:
-    params = {
-        "page": page,
-        "page_size": page_size,
-        "search": search,
-        "date_from": date_from,
-        "date_to": date_to,
-    }
-    payload = ApiClient(ctx).request("GET", "/images", require_auth=True, params=params)
+    params: dict[str, Any] = {"page": page, "page_size": page_size}
+    if search:
+        params["search"] = search
+    if date_from:
+        params["date_from"] = date_from
+    if date_to:
+        params["date_to"] = date_to
+    payload = ApiClient(ctx).request("GET", "/images/", require_auth=True, params=params)
     _emit(ctx, payload)
 
 
@@ -509,16 +540,13 @@ def upload_files(
         for file_path in file_paths:
             handle = file_path.open("rb")
             opened_files.append(handle)
-            mime = "image/jpeg"
-            suffix = file_path.suffix.lower()
-            if suffix == ".png":
-                mime = "image/png"
-            elif suffix == ".gif":
-                mime = "image/gif"
-            elif suffix == ".webp":
-                mime = "image/webp"
-            elif suffix == ".bmp":
-                mime = "image/bmp"
+            # Use mimetypes library for better detection, fallback to jpeg
+            mime_type, _ = mimetypes.guess_type(str(file_path))
+            if mime_type and mime_type in SUPPORTED_IMAGE_MIME_TYPES:
+                mime = mime_type
+            else:
+                # Fallback to jpeg if detection fails or unsupported type
+                mime = "image/jpeg"
             multipart_files.append(("images", (file_path.name, handle, mime)))
 
         form_data = {"hashes": hashes_payload} if hashes_payload else None
@@ -742,7 +770,8 @@ def ai_prompts_get(ctx: CLIContext, prompt_id: str) -> None:
 @click.argument("prompt_id")
 @click.option("--name", default=None)
 @click.option("--description", default=None)
-@click.option("--is-active", type=bool, default=None, help="true/false")
+@click.option("--is-active", type=bool, default=None, help="Set active status (true/false)")
+@click.option("--inactive", is_flag=True, help="Shortcut for --is-active false")
 @pass_cli_context
 def ai_prompts_update(
     ctx: CLIContext,
@@ -750,7 +779,13 @@ def ai_prompts_update(
     name: str | None,
     description: str | None,
     is_active: bool | None,
+    inactive: bool,
 ) -> None:
+    if inactive and is_active is not None:
+        raise CLIError("Use either --is-active or --inactive, not both.", 2)
+    if inactive:
+        is_active = False
+
     body = {
         key: value
         for key, value in {

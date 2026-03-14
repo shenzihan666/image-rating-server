@@ -36,6 +36,13 @@ uv run irs --json auth login --email demo@example.com
 # List images with token
 uv run irs --token <ACCESS_TOKEN> images list --page 1 --page-size 20
 
+# List images in JSON while keeping verbose diagnostics on stderr
+uv run irs --json --verbose --token <ACCESS_TOKEN> images list > images.json
+
+# Update prompt active status
+uv run irs ai prompts update <PROMPT_ID> --is-active false
+uv run irs ai prompts update <PROMPT_ID> --inactive
+
 # Batch analyze images
 uv run irs --token <ACCESS_TOKEN> ai analyze batch --ids img1,img2 --force-new
 ```

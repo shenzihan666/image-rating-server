@@ -34,7 +34,7 @@ uv run irs ai prompts --help
 - `--token`：Bearer Access Token（无状态，不会持久化）
 - `--json`：JSON 输出模式（适合脚本/CI）
 - `--timeout`：请求超时秒数（默认 `30`）
-- `--verbose`：预留调试开关
+- `--verbose`：输出请求/响应调试信息到 `stderr`，不会污染 `--json` 的 `stdout`
 
 环境变量：
 - `IMAGE_RATING_BASE_URL`
@@ -45,6 +45,7 @@ uv run irs ai prompts --help
 ```bash
 uv run irs --base-url http://localhost:8080 --token <ACCESS_TOKEN> images list
 uv run irs --json --token <ACCESS_TOKEN> auth me
+uv run irs --json --verbose --token <ACCESS_TOKEN> images list > images.json
 ```
 
 ## 3. 认证说明（无状态）
@@ -114,9 +115,14 @@ uv run irs --token <ACCESS_TOKEN> users list --page 1 --page-size 50
 
 ```bash
 uv run irs --token <ACCESS_TOKEN> images list --search cat
+uv run irs --token <ACCESS_TOKEN> images list --date-from 2024-01-01 --date-to 2024-12-31
 uv run irs --token <ACCESS_TOKEN> images update <image_id> --title "new-title"
 uv run irs --token <ACCESS_TOKEN> images delete-batch --ids-file ./ids.txt
 ```
+
+说明：
+- `images list` 始终发送 `page` 和 `page_size`
+- `--search`、`--date-from`、`--date-to` 仅在显式传参时才会附带到请求中
 
 `ids.txt` 示例（每行一个 ID）：
 
@@ -136,6 +142,11 @@ img-id-3
 uv run irs --token <ACCESS_TOKEN> upload files ./a.jpg ./b.png
 uv run irs --token <ACCESS_TOKEN> upload files ./a.jpg --hashes-file ./hashes.json
 ```
+
+说明：
+- CLI 会根据文件扩展名推断上传时使用的 MIME type
+- 当前内置支持的常见图片类型：`.jpg`、`.jpeg`、`.png`、`.gif`、`.webp`、`.bmp`
+- 如果扩展名无法识别，CLI 会回退为 `image/jpeg`
 
 `hashes.json` 示例：
 
@@ -194,7 +205,7 @@ uv run irs --token <ACCESS_TOKEN> ai analyze batch --ids-file ./ids.txt --force-
 - `ai prompts list [--model-name qwen3-vl]`
 - `ai prompts create ...`
 - `ai prompts get <prompt_id>`
-- `ai prompts update <prompt_id> [--name] [--description] [--is-active true|false]`
+- `ai prompts update <prompt_id> [--name] [--description] [--is-active true|false] [--inactive]`
 - `ai prompts delete <prompt_id>`
 - `ai prompts versions list <prompt_id>`
 - `ai prompts versions create <prompt_id> ...`
@@ -231,6 +242,19 @@ uv run irs ai prompts versions create <prompt_id> \
   --commit-message "refine tone"
 ```
 
+更新 Prompt 状态：
+
+```bash
+uv run irs ai prompts update <prompt_id> --is-active true
+uv run irs ai prompts update <prompt_id> --is-active false
+uv run irs ai prompts update <prompt_id> --inactive
+```
+
+说明：
+- `--is-active true|false` 适合脚本或显式传值场景
+- `--inactive` 是 `--is-active false` 的快捷写法
+- 不要同时传 `--is-active` 和 `--inactive`
+
 ## 5. 输出格式
 
 默认是人类可读格式（表格或 key-value）。
@@ -242,6 +266,7 @@ uv run irs --json --token <ACCESS_TOKEN> images list
 ```
 
 建议在脚本中始终使用 `--json`，并通过 `jq` 等工具解析。
+如需同时开启调试输出，配合 `--verbose` 即可；调试信息会写入 `stderr`。
 
 ## 6. 退出码
 
