@@ -106,3 +106,4 @@ public/uploads/
 *.tmp
 *.bak
 .cache/
+.dmux/

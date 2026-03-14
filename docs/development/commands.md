@@ -22,6 +22,24 @@ uv run ruff check .
 uv run mypy app
 ```
 
+## Backend CLI (Business API)
+
+Run from `backend/`:
+
+```bash
+# Show CLI help
+uv run irs --help
+
+# Login (returns access/refresh token)
+uv run irs --json auth login --email demo@example.com
+
+# List images with token
+uv run irs --token <ACCESS_TOKEN> images list --page 1 --page-size 20
+
+# Batch analyze images
+uv run irs --token <ACCESS_TOKEN> ai analyze batch --ids img1,img2 --force-new
+```
+
 ## Frontend
 
 Run these from `frontend/`:

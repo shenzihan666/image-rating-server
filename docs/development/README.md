@@ -7,6 +7,8 @@ conventions.
 
 - [Commands](./commands.md)
   - Daily development, validation, and startup commands
+- [CLI Usage](./cli-usage.md)
+  - End-to-end usage guide for `irs` business API CLI
 - [Environment](./environment.md)
   - Ports, URLs, and runtime variables
 - [Conventions](./conventions.md)
