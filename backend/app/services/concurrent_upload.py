@@ -119,6 +119,7 @@ class ConcurrentUploadService:
         files: list[UploadFile] | None,
         hashes_json: str | None,
         user_id: str,
+        auto_analyze: bool = False,
     ) -> UploadResponse:
         """
         Process batch upload with concurrent control.
@@ -196,6 +197,25 @@ class ConcurrentUploadService:
             f"Batch upload completed: total={len(files)}, "
             f"succeeded={succeeded}, duplicated={duplicated}, failed={failed}"
         )
+
+        # Trigger auto-analyze for newly uploaded images (not duplicates/failures)
+        if auto_analyze and succeeded > 0:
+            from app.services.auto_analyze import run_auto_analyze
+
+            new_image_ids = [
+                r.metadata.image_id
+                for r in results
+                if r.status == UploadStatus.SUCCESS and r.metadata is not None
+            ]
+            if new_image_ids:
+                logger.info(
+                    f"auto_analyze: triggering analysis for {len(new_image_ids)} new image(s)"
+                )
+                async for db in session_factory():
+                    analyze_tasks = [
+                        run_auto_analyze(image_id, db) for image_id in new_image_ids
+                    ]
+                    await asyncio.gather(*analyze_tasks)
 
         return UploadResponse(
             success=failed == 0,
