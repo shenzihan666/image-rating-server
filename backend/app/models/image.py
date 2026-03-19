@@ -4,7 +4,7 @@ Image database model
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text
 
 if TYPE_CHECKING:
     pass
@@ -20,7 +20,6 @@ class Image(Base):
     __tablename__ = "images"
 
     id: str = Column(String(36), primary_key=True, index=True)
-    user_id: str = Column(String(36), ForeignKey("users.id"), nullable=False)
     title: str = Column(String(255), nullable=False)
     description: str | None = Column(Text, nullable=True)
     file_path: str = Column(String(500), nullable=False)

@@ -1,7 +1,6 @@
 """
 Image service for business logic layer
 """
-import math
 from pathlib import Path
 
 from loguru import logger
@@ -26,7 +25,6 @@ class ImageService:
 
     async def get_images(
         self,
-        user_id: str,
         page: int = 1,
         page_size: int = 20,
         search: str | None = None,
@@ -34,10 +32,9 @@ class ImageService:
         date_to: str | None = None,
     ) -> tuple[list[Image], int]:
         """
-        Get paginated list of images for a user.
+        Get paginated list of images.
 
         Args:
-            user_id: User ID to filter images
             page: Page number (1-indexed)
             page_size: Number of items per page
             search: Optional search term for title/description
@@ -50,7 +47,7 @@ class ImageService:
         from datetime import datetime
 
         # Build base query
-        query = select(Image).where(Image.user_id == user_id)
+        query = select(Image)
 
         # Add search filter if provided
         if search:
@@ -88,26 +85,23 @@ class ImageService:
 
         return images, total
 
-    async def get_image(self, image_id: str, user_id: str) -> Image | None:
+    async def get_image(self, image_id: str) -> Image | None:
         """
         Get a single image by ID.
 
         Args:
             image_id: Image ID
-            user_id: User ID (for ownership verification)
 
         Returns:
             Image object or None if not found
         """
-        result = await self.db.execute(
-            select(Image).where(Image.id == image_id, Image.user_id == user_id)
-        )
+        query = select(Image).where(Image.id == image_id)
+        result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
     async def update_image(
         self,
         image_id: str,
-        user_id: str,
         title: str | None = None,
         description: str | None = None,
     ) -> Image | None:
@@ -116,16 +110,14 @@ class ImageService:
 
         Args:
             image_id: Image ID
-            user_id: User ID (for ownership verification)
             title: New title (optional)
             description: New description (optional)
 
         Returns:
             Updated Image object or None if not found
         """
-        result = await self.db.execute(
-            select(Image).where(Image.id == image_id, Image.user_id == user_id)
-        )
+        query = select(Image).where(Image.id == image_id)
+        result = await self.db.execute(query)
         image = result.scalar_one_or_none()
 
         if not image:
@@ -140,23 +132,21 @@ class ImageService:
         await self.db.commit()
         await self.db.refresh(image)
 
-        logger.info(f"Updated image {image_id} for user {user_id}")
+        logger.info(f"Updated image {image_id}")
         return image
 
-    async def delete_image(self, image_id: str, user_id: str) -> bool:
+    async def delete_image(self, image_id: str) -> bool:
         """
         Delete an image and its file.
 
         Args:
             image_id: Image ID
-            user_id: User ID (for ownership verification)
 
         Returns:
             True if deleted, False if not found
         """
-        result = await self.db.execute(
-            select(Image).where(Image.id == image_id, Image.user_id == user_id)
-        )
+        query = select(Image).where(Image.id == image_id)
+        result = await self.db.execute(query)
         image = result.scalar_one_or_none()
 
         if not image:
@@ -176,5 +166,5 @@ class ImageService:
         await self.db.execute(delete(Image).where(Image.id == image_id))
         await self.db.commit()
 
-        logger.info(f"Deleted image {image_id} for user {user_id}")
+        logger.info(f"Deleted image {image_id}")
         return True

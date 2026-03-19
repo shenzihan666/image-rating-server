@@ -18,7 +18,6 @@ from uuid import uuid4
 
 # Set test environment BEFORE importing app modules
 os.environ.setdefault("ENVIRONMENT", "test")
-os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing-only-not-for-production-12345")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_app.db")
 
 import pytest

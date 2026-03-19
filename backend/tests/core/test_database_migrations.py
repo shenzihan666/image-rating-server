@@ -51,10 +51,78 @@ async def test_apply_schema_migrations_adds_images_hash_column(tmp_path) -> None
         cols_result = await conn.exec_driver_sql('PRAGMA table_info("images")')
         cols = [row[1] for row in cols_result.fetchall()]
         assert "hash_sha256" in cols
+        assert "user_id" not in cols
 
         idx_result = await conn.exec_driver_sql('PRAGMA index_list("images")')
         indexes = [row[1] for row in idx_result.fetchall()]
         assert "ix_images_hash_sha256" in indexes
+
+        assert await _get_schema_version(conn) == LATEST_SCHEMA_VERSION
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_migration_v6_rebuilds_images_when_user_id_has_foreign_key(tmp_path) -> None:
+    """
+    Legacy schemas may declare user_id as REFERENCES users(id). SQLite's
+    DROP COLUMN then fails; v6 must rebuild the table instead.
+    """
+    db_path = tmp_path / "legacy_fk.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+
+    async with engine.begin() as conn:
+        await conn.exec_driver_sql(
+            """
+            CREATE TABLE users (
+                id VARCHAR(36) PRIMARY KEY
+            )
+            """
+        )
+        await conn.exec_driver_sql(
+            """
+            CREATE TABLE images (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL REFERENCES users(id),
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                file_path VARCHAR(500) NOT NULL,
+                file_size INTEGER NOT NULL,
+                width INTEGER,
+                height INTEGER,
+                mime_type VARCHAR(100) NOT NULL,
+                average_rating FLOAT,
+                rating_count INTEGER,
+                created_at DATETIME,
+                updated_at DATETIME
+            )
+            """
+        )
+        await conn.exec_driver_sql(
+            "INSERT INTO users (id) VALUES ('user-1')"
+        )
+        await conn.exec_driver_sql(
+            """
+            INSERT INTO images (
+                id, user_id, title, file_path, file_size, mime_type
+            ) VALUES (
+                'img-1', 'user-1', 't', '/x', 1, 'image/jpeg'
+            )
+            """
+        )
+
+        await _apply_schema_migrations(conn)
+
+        cols_result = await conn.exec_driver_sql('PRAGMA table_info("images")')
+        cols = [row[1] for row in cols_result.fetchall()]
+        assert "user_id" not in cols
+        assert "hash_sha256" in cols
+
+        row_result = await conn.exec_driver_sql('SELECT id, title FROM images WHERE id = ?', ("img-1",))
+        row = row_result.fetchone()
+        assert row is not None
+        assert row[0] == "img-1"
+        assert row[1] == "t"
 
         assert await _get_schema_version(conn) == LATEST_SCHEMA_VERSION
 

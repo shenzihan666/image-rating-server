@@ -34,7 +34,6 @@ class ImageResponse(BaseModel):
     """Image response schema."""
 
     id: str = Field(..., description="Image ID")
-    user_id: str = Field(..., description="Owner user ID")
     title: str = Field(..., description="Image title")
     description: str | None = Field(None, description="Image description")
     file_path: str = Field(..., description="Relative file path")

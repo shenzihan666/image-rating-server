@@ -7,7 +7,7 @@ following industry best practices:
 - Clear test naming with descriptive docstrings
 - AAA pattern (Arrange-Act-Assert)
 - Edge case coverage
-- Authentication testing
+- Shared-engine teardown restores schema after `drop_all` for other API tests
 - Concurrent upload behavior verification
 """
 import hashlib
@@ -21,10 +21,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import Base, async_session_maker, engine
-from app.core.security import create_access_token
 from app.models.image import Image
-from app.models.user import User
 from app.services.storage import get_storage_service
+
+# Minimal valid JPEG for tests (no external image file required).
+_MINIMAL_JPEG = (
+    b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00H\x00H\x00\x00"
+    b"\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t"
+    b"\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a"
+    b"\x1f\x1e\x1d\x1a\x1c\x1c $.\' \",#\x1c\x1c(7),01444\x1f\'9=82"
+    b"<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff"
+    b"\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00"
+    b"\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n"
+    b"\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xf5\x14P\x00\xff\xd9"
+)
 
 
 # ============================================================================
@@ -37,11 +47,11 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """
     Create a clean database session for each test function.
 
-    This fixture ensures database isolation between tests by:
-    1. Creating all tables before the test
-    2. Providing a clean session
-    3. Dropping all tables after the test
+    Drops and recreates schema at the start and end so API tests that share the
+    same SQLite file do not leave rows that break fixtures (e.g. unique hash).
     """
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -51,52 +61,16 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
 @pytest.fixture
-async def test_user(db_session: AsyncSession) -> User:
-    """
-    Create and return a test user.
-
-    Returns:
-        User: A test user with hashed password
-    """
-    from app.core.security import hash_password
-
-    user = User(
-        id="test-user-id",
-        email="test@example.com",
-        full_name="Test User",
-        hashed_password=hash_password("testpassword123"),
-        is_active=True,
-    )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
-    return user
-
-
-@pytest.fixture
-def auth_headers(test_user: User) -> dict[str, str]:
-    """
-    Generate authentication headers for a test user.
-
-    Returns:
-        dict: Headers with Authorization Bearer token
-    """
-    token = create_access_token(data={"sub": test_user.id, "email": test_user.email})
-    return {"Authorization": f"Bearer {token}"}
-
-
-@pytest.fixture
-def test_image_path() -> Path:
-    """
-    Get the path to the test image file.
-
-    Returns:
-        Path: Path to the test JPEG image
-    """
-    return Path(r"D:\Project\image-rating-server\1.合格.jpg")
+def test_image_path(tmp_path: Path) -> Path:
+    """Writable path to a minimal valid JPEG used as upload sample bytes source."""
+    path = tmp_path / "sample.jpg"
+    path.write_bytes(_MINIMAL_JPEG)
+    return path
 
 
 @pytest.fixture
@@ -145,7 +119,6 @@ def sample_image_hash(sample_image_bytes: bytes) -> str:
 @pytest.fixture
 async def uploaded_image(
     db_session: AsyncSession,
-    test_user: User,
     sample_image_bytes: bytes,
     sample_image_hash: str,
 ) -> Image:
@@ -159,7 +132,6 @@ async def uploaded_image(
 
     image = Image(
         id=str(uuid.uuid4()),
-        user_id=test_user.id,
         title="existing-image.jpg",
         description=None,
         file_path="2024/01/01/test-image.jpg",
@@ -203,49 +175,6 @@ def oversized_file_bytes() -> bytes:
 # ============================================================================
 
 
-class TestUploadEndpointAuthentication:
-    """Tests for upload endpoint authentication requirements."""
-
-    @pytest.mark.asyncio
-    async def test_upload_without_auth_returns_401(
-        self,
-        async_client: AsyncClient,
-        sample_image_bytes: bytes,
-    ) -> None:
-        """
-        Test that uploading without authentication returns 401 Unauthorized.
-
-        Arrange: Prepare image file data without auth headers
-        Act: POST to /api/v1/upload without authentication
-        Assert: Response status is 401
-        """
-        files = {"images": ("test.jpg", sample_image_bytes, "image/jpeg")}
-        response = await async_client.post("/api/v1/upload", files=files)
-
-        assert response.status_code == 401
-        assert "detail" in response.json()
-
-
-    @pytest.mark.asyncio
-    async def test_upload_with_invalid_token_returns_401(
-        self,
-        async_client: AsyncClient,
-        sample_image_bytes: bytes,
-    ) -> None:
-        """
-        Test that uploading with invalid token returns 401 Unauthorized.
-
-        Arrange: Prepare image file data with invalid token
-        Act: POST to /api/v1/upload with invalid Authorization header
-        Assert: Response status is 401
-        """
-        files = {"images": ("test.jpg", sample_image_bytes, "image/jpeg")}
-        headers = {"Authorization": "Bearer invalid-token-12345"}
-        response = await async_client.post("/api/v1/upload", files=files, headers=headers)
-
-        assert response.status_code == 401
-
-
 class TestUploadEndpointSuccess:
     """Tests for successful upload scenarios."""
 
@@ -253,22 +182,20 @@ class TestUploadEndpointSuccess:
     async def test_upload_single_image_success(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
         db_session: AsyncSession,
     ) -> None:
         """
         Test successful single image upload.
 
-        Arrange: Prepare authenticated client and valid image file
+        Arrange: Prepare async client and valid image file
         Act: POST single image to /api/v1/upload
         Assert: Response indicates success with correct metadata
         """
-        files = {"images": ("1.合格.jpg", sample_image_bytes, "image/jpeg")}
+        files = {"images": ("sample.jpg", sample_image_bytes, "image/jpeg")}
         response = await async_client.post(
             "/api/v1/upload",
             files=files,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -285,8 +212,8 @@ class TestUploadEndpointSuccess:
         # Verify result metadata
         result = data["results"][0]
         assert result["status"] == "success"
-        assert result["original_filename"] == "1.合格.jpg"
-        assert result["metadata"]["file_name"] == "1.合格.jpg"
+        assert result["original_filename"] == "sample.jpg"
+        assert result["metadata"]["file_name"] == "sample.jpg"
         assert result["metadata"]["file_size"] == len(sample_image_bytes)
         assert result["metadata"]["mime_type"] == "image/jpeg"
         assert result["metadata"]["hash_sha256"]
@@ -299,7 +226,7 @@ class TestUploadEndpointSuccess:
         db_result = await db_session.execute(stmt)
         db_image = db_result.scalar_one_or_none()
         assert db_image is not None
-        assert db_image.title == "1.合格.jpg"
+        assert db_image.title == "sample.jpg"
         assert db_image.hash_sha256 == result["metadata"]["hash_sha256"]
 
 
@@ -307,14 +234,13 @@ class TestUploadEndpointSuccess:
     async def test_upload_multiple_images_success(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         unique_image_bytes_list: list[bytes],
         db_session: AsyncSession,
     ) -> None:
         """
         Test successful multiple image upload.
 
-        Arrange: Prepare authenticated client and multiple image files with unique content
+        Arrange: Prepare async client and multiple image files with unique content
         Act: POST 3 images to /api/v1/upload
         Assert: All images uploaded successfully
         """
@@ -326,7 +252,6 @@ class TestUploadEndpointSuccess:
         response = await async_client.post(
             "/api/v1/upload",
             files=files,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -344,7 +269,6 @@ class TestUploadEndpointSuccess:
     async def test_upload_with_valid_hash(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
         sample_image_hash: str,
     ) -> None:
@@ -363,7 +287,6 @@ class TestUploadEndpointSuccess:
             "/api/v1/upload",
             files=files,
             data=data,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -376,7 +299,6 @@ class TestUploadEndpointSuccess:
     async def test_upload_dimensions_extraction(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
     ) -> None:
         """
@@ -390,7 +312,6 @@ class TestUploadEndpointSuccess:
         response = await async_client.post(
             "/api/v1/upload",
             files=files,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -410,7 +331,6 @@ class TestUploadEndpointDuplicateDetection:
     async def test_upload_duplicate_returns_duplicated_status(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
         uploaded_image: Image,
     ) -> None:
@@ -425,7 +345,6 @@ class TestUploadEndpointDuplicateDetection:
         response = await async_client.post(
             "/api/v1/upload",
             files=files,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -447,7 +366,6 @@ class TestUploadEndpointDuplicateDetection:
     async def test_upload_duplicate_with_wrong_hash_still_succeeds(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
         uploaded_image: Image,
     ) -> None:
@@ -467,7 +385,6 @@ class TestUploadEndpointDuplicateDetection:
             "/api/v1/upload",
             files=files,
             data=data,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -483,7 +400,6 @@ class TestUploadEndpointValidation:
     async def test_upload_empty_file_list(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
     ) -> None:
         """
         Test uploading with no files.
@@ -492,7 +408,7 @@ class TestUploadEndpointValidation:
         Act: POST to /api/v1/upload with empty files
         Assert: Returns 200 with success response and zero counts
         """
-        response = await async_client.post("/api/v1/upload", headers=auth_headers)
+        response = await async_client.post("/api/v1/upload")
 
         assert response.status_code == 200
         data = response.json()
@@ -508,7 +424,6 @@ class TestUploadEndpointValidation:
     async def test_upload_exceeds_max_files(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
     ) -> None:
         """
@@ -526,7 +441,6 @@ class TestUploadEndpointValidation:
         response = await async_client.post(
             "/api/v1/upload",
             files=files,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -540,7 +454,6 @@ class TestUploadEndpointValidation:
     async def test_upload_invalid_file_extension(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
     ) -> None:
         """
         Test uploading file with invalid extension.
@@ -553,7 +466,6 @@ class TestUploadEndpointValidation:
         response = await async_client.post(
             "/api/v1/upload",
             files=files,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -568,7 +480,6 @@ class TestUploadEndpointValidation:
     async def test_upload_no_filename(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
     ) -> None:
         """
@@ -582,7 +493,6 @@ class TestUploadEndpointValidation:
         response = await async_client.post(
             "/api/v1/upload",
             files=files,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -600,7 +510,6 @@ class TestUploadEndpointHashHandling:
     async def test_upload_with_hash_mismatch_stores_correct_hash(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
         sample_image_hash: str,
         db_session: AsyncSession,
@@ -621,7 +530,6 @@ class TestUploadEndpointHashHandling:
             "/api/v1/upload",
             files=files,
             data=data,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -636,7 +544,6 @@ class TestUploadEndpointHashHandling:
     async def test_upload_with_invalid_json_hashes(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
     ) -> None:
         """
@@ -652,7 +559,6 @@ class TestUploadEndpointHashHandling:
             "/api/v1/upload",
             files=files,
             data=data,
-            headers=auth_headers,
         )
 
         # Should still succeed, just without hash verification
@@ -668,7 +574,6 @@ class TestUploadEndpointResponseFormat:
     async def test_response_contains_all_required_fields(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
     ) -> None:
         """
@@ -682,7 +587,6 @@ class TestUploadEndpointResponseFormat:
         response = await async_client.post(
             "/api/v1/upload",
             files=files,
-            headers=auth_headers,
         )
 
         assert response.status_code == 200
@@ -707,7 +611,6 @@ class TestUploadEndpointResponseFormat:
     async def test_result_item_contains_all_required_fields(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
     ) -> None:
         """
@@ -721,7 +624,6 @@ class TestUploadEndpointResponseFormat:
         response = await async_client.post(
             "/api/v1/upload",
             files=files,
-            headers=auth_headers,
         )
 
         data = response.json()
@@ -755,7 +657,6 @@ class TestUploadEndpointMultipleFileTypes:
     async def test_upload_supported_image_types(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         sample_image_bytes: bytes,
         file_type: str,
         extension: str,
@@ -772,7 +673,6 @@ class TestUploadEndpointMultipleFileTypes:
         response = await async_client.post(
             "/api/v1/upload",
             files=files,
-            headers=auth_headers,
         )
 
         # Should succeed or fail based on actual file content validity

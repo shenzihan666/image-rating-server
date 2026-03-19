@@ -5,32 +5,8 @@
 - API root: `/api/v1`
 - OpenAPI UI: `/docs`
 
-All authenticated endpoints use Bearer tokens issued by the backend auth flow.
-
-## Authentication
-
-Routes under `/api/v1/auth`:
-
-- `POST /login`
-  - Exchange email and password for access and refresh tokens
-- `POST /refresh`
-  - Refresh an expired access token
-- `POST /logout`
-  - Stateless logout endpoint
-- `GET /me`
-  - Resolve the currently authenticated user
-
-## Users
-
-Routes under `/api/v1/users`:
-
-- `GET /me`
-- `PATCH /me`
-- `POST /me/change-password`
-- `GET /`
-- `GET /{user_id}`
-
-These routes expose current-user profile management and basic user listing.
+The FastAPI app in this repository exposes the routes below without a built-in
+user table or `/users` API. Add gateway or middleware auth if you need protection.
 
 ## Images
 

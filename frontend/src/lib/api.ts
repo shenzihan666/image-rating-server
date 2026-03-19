@@ -1,14 +1,11 @@
 /**
  * API Client for communicating with the FastAPI backend
- * Updated to work with NextAuth.js session
  */
 import type { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios'
 import axios, { AxiosInstance } from 'axios'
 
 import type {
   UploadResponse,
-  TokenResponse,
-  User,
   Image,
   PaginatedResponse,
   BatchAnalyzeResponse,
@@ -31,45 +28,6 @@ export interface ApiError {
   status?: number
 }
 
-// Token getter function type
-let tokenGetter: (() => Promise<string | null>) | null = null
-let pendingSessionToken: Promise<string | null> | null = null
-
-async function getSessionAccessToken(): Promise<string | null> {
-  if (typeof window === 'undefined') {
-    return null
-  }
-
-  if (!pendingSessionToken) {
-    pendingSessionToken = import('next-auth/react')
-      .then(async ({ getSession }) => {
-        const session = await getSession()
-        return session?.accessToken ?? null
-      })
-      .finally(() => {
-        pendingSessionToken = null
-      })
-  }
-
-  return pendingSessionToken
-}
-
-async function resolveAccessToken(): Promise<string | null> {
-  const token = tokenGetter ? await tokenGetter() : null
-  if (token) {
-    return token
-  }
-
-  return getSessionAccessToken()
-}
-
-/**
- * Set the token getter function (called from SessionProvider context)
- */
-export function setTokenGetter(getter: () => Promise<string | null>): void {
-  tokenGetter = getter
-}
-
 /**
  * Create axios instance with default configuration
  */
@@ -79,7 +37,7 @@ const createApiClient = (): AxiosInstance => {
     timeout: 30000,
   })
 
-  // Request interceptor - Add auth token
+  // Request interceptor - handle FormData content-type
   client.interceptors.request.use(
     async (config) => {
       // Let browser/axios set multipart boundaries automatically for FormData.
@@ -96,11 +54,6 @@ const createApiClient = (): AxiosInstance => {
           delete (config.headers as Record<string, string>)['Content-Type']
         }
       }
-
-      const token = await resolveAccessToken()
-      if (token && config.headers) {
-        config.headers.Authorization = `Bearer ${token}`
-      }
       return config
     },
     (error) => Promise.reject(error)
@@ -110,17 +63,6 @@ const createApiClient = (): AxiosInstance => {
   client.interceptors.response.use(
     (response) => response,
     async (error: AxiosError<ApiError>) => {
-      // Handle 401 Unauthorized
-      if (error.response?.status === 401) {
-        // NextAuth will handle token refresh, so if we get 401,
-        // the session might be invalid. Force sign out.
-        if (typeof window !== 'undefined') {
-          // Import signOut dynamically to avoid circular dependencies
-          const { signOut } = await import('next-auth/react')
-          await signOut({ callbackUrl: '/login' })
-        }
-      }
-
       // Return formatted error
       const apiError: ApiError = {
         detail: error.response?.data?.detail || error.message || 'An error occurred',
@@ -164,47 +106,6 @@ export const api = {
 
   delete: <T = unknown>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> =>
     apiClient.delete<T>(url, config),
-}
-
-/**
- * Authentication API
- * Note: Login is handled by NextAuth, these are for internal use
- */
-export const authApi = {
-  // Login is handled by NextAuth credentials provider
-  // This method is kept for potential direct use but should not be used normally
-  login: (email: string, password: string) =>
-    api.post<TokenResponse>('/auth/login', { email, password }),
-
-  // Register endpoint is removed from backend
-  register: undefined,
-
-  logout: () => api.post('/auth/logout'),
-
-  refreshToken: (refreshToken: string) =>
-    api.post<TokenResponse>('/auth/refresh', { refresh_token: refreshToken }),
-
-  getMe: () => api.get<User>('/auth/me'),
-}
-
-/**
- * User API
- */
-export const userApi = {
-  getProfile: () => api.get('/users/me'),
-
-  updateProfile: (data: { full_name?: string; email?: string }) => api.patch('/users/me', data),
-
-  changePassword: (oldPassword: string, newPassword: string) =>
-    api.post('/users/me/change-password', {
-      old_password: oldPassword,
-      new_password: newPassword,
-    }),
-
-  listUsers: (page: number = 1, pageSize: number = 20) =>
-    api.get('/users/', { params: { page, page_size: pageSize } }),
-
-  getUser: (userId: string) => api.get(`/users/${userId}`),
 }
 
 /**

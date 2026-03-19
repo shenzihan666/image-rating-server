@@ -10,7 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
-from app.api.deps import ActiveUser, get_db
+from app.api.deps import get_db
 from app.core.config import settings
 from app.core.database import AsyncSession
 from app.schemas.analyze import ImageAnalyzeResponse
@@ -24,7 +24,6 @@ router = APIRouter()
 
 @router.get("/", response_model=ImageListResponse)
 async def list_images(
-    current_user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -33,10 +32,9 @@ async def list_images(
     date_to: Annotated[str | None, Query(description="Filter images until this date (ISO format)")] = None,
 ) -> ImageListResponse:
     """
-    List current user's images with pagination.
+    List all images with pagination.
 
     Args:
-        current_user: Current authenticated user
         db: Database session
         page: Page number (default: 1)
         page_size: Items per page (default: 20, max: 100)
@@ -49,7 +47,6 @@ async def list_images(
     """
     image_service = ImageService(db)
     images, total = await image_service.get_images(
-        user_id=current_user["user_id"],
         page=page,
         page_size=page_size,
         search=search,
@@ -68,7 +65,6 @@ async def list_images(
         items=[
             ImageResponse(
                 id=img.id,
-                user_id=img.user_id,
                 title=img.title,
                 description=img.description,
                 file_path=img.file_path,
@@ -98,7 +94,6 @@ async def list_images(
 @router.get("/{image_id}", response_model=ImageResponse)
 async def get_image(
     image_id: str,
-    current_user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ImageResponse:
     """
@@ -106,7 +101,6 @@ async def get_image(
 
     Args:
         image_id: Image ID
-        current_user: Current authenticated user
         db: Database session
 
     Returns:
@@ -116,7 +110,7 @@ async def get_image(
         HTTPException: If image not found
     """
     image_service = ImageService(db)
-    image = await image_service.get_image(image_id, current_user["user_id"])
+    image = await image_service.get_image(image_id)
 
     if not image:
         raise HTTPException(
@@ -130,7 +124,6 @@ async def get_image(
 
     return ImageResponse(
         id=image.id,
-        user_id=image.user_id,
         title=image.title,
         description=image.description,
         file_path=image.file_path,
@@ -153,7 +146,6 @@ async def get_image(
 @router.get("/{image_id}/analysis", response_model=ImageAnalyzeResponse)
 async def get_image_analysis(
     image_id: str,
-    current_user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ImageAnalyzeResponse:
     """
@@ -161,7 +153,6 @@ async def get_image_analysis(
 
     Args:
         image_id: Image ID
-        current_user: Current authenticated user
         db: Database session
 
     Returns:
@@ -171,7 +162,7 @@ async def get_image_analysis(
         HTTPException: If image or analysis result not found
     """
     image_service = ImageService(db)
-    image = await image_service.get_image(image_id, current_user["user_id"])
+    image = await image_service.get_image(image_id)
 
     if not image:
         raise HTTPException(
@@ -208,7 +199,6 @@ async def get_image_analysis(
 async def update_image(
     image_id: str,
     request: ImageUpdate,
-    current_user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ImageResponse:
     """
@@ -217,7 +207,6 @@ async def update_image(
     Args:
         image_id: Image ID
         request: Update data
-        current_user: Current authenticated user
         db: Database session
 
     Returns:
@@ -229,7 +218,6 @@ async def update_image(
     image_service = ImageService(db)
     image = await image_service.update_image(
         image_id=image_id,
-        user_id=current_user["user_id"],
         title=request.title,
         description=request.description,
     )
@@ -246,7 +234,6 @@ async def update_image(
 
     return ImageResponse(
         id=image.id,
-        user_id=image.user_id,
         title=image.title,
         description=image.description,
         file_path=image.file_path,
@@ -269,7 +256,6 @@ async def update_image(
 @router.delete("/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_image(
     image_id: str,
-    current_user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """
@@ -277,7 +263,6 @@ async def delete_image(
 
     Args:
         image_id: Image ID
-        current_user: Current authenticated user
         db: Database session
 
     Raises:
@@ -289,7 +274,7 @@ async def delete_image(
     await analysis_service.delete_by_image_id(image_id)
 
     # Delete image
-    success = await image_service.delete_image(image_id, current_user["user_id"])
+    success = await image_service.delete_image(image_id)
 
     if not success:
         raise HTTPException(
@@ -301,7 +286,6 @@ async def delete_image(
 @router.post("/batch/delete", response_model=BatchDeleteResponse)
 async def batch_delete(
     request: BatchDeleteRequest,
-    current_user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BatchDeleteResponse:
     """
@@ -309,7 +293,6 @@ async def batch_delete(
 
     Args:
         request: Batch delete request with image IDs
-        current_user: Current authenticated user
         db: Database session
 
     Returns:
@@ -327,7 +310,7 @@ async def batch_delete(
         await analysis_service.delete_by_image_id(image_id)
 
         # Delete image
-        success = await image_service.delete_image(image_id, current_user["user_id"])
+        success = await image_service.delete_image(image_id)
         if success:
             deleted += 1
         else:

@@ -36,19 +36,18 @@ model run on every page load.
 - `backend/app/api/v1/router.py`
   - Aggregates all API v1 routers
 - `backend/app/api/deps.py`
-  - Shared auth and database dependencies
+  - Database session dependency (`get_db`)
 - `backend/app/api/v1/endpoints/`
-  - Endpoint modules for auth, users, images, upload, AI analyze, and AI prompts
+  - Endpoint modules for images, upload, AI analyze, and AI prompts
 
 ### Domain and Service Layer
 
 - `backend/app/models/`
-  - SQLAlchemy ORM models such as `User`, `Image`, `Rating`, `AIModel`, and
-    `AnalysisResult`
+  - SQLAlchemy ORM models such as `Image`, `AIModel`, and `AnalysisResult`
 - `backend/app/schemas/`
   - Pydantic request and response schemas
 - `backend/app/services/`
-  - Business logic for auth, image management, upload, result persistence, and
+  - Business logic for image management, upload, result persistence, and
     concurrent processing
 - `backend/app/services/ai/`
   - Model registry, prompt store, runtime configuration store, and analyzer
@@ -82,14 +81,8 @@ model run on every page load.
 
 ### Dependency Injection
 
-Use the aliases from `backend/app/api/deps.py` in endpoints:
-
-- `CurrentUser`
-- `ActiveUser`
-- `OptionalUser`
-
-Database access in endpoints should continue to come from
-`Annotated[AsyncSession, Depends(get_db)]`.
+Database access in endpoints should use
+`Annotated[AsyncSession, Depends(get_db)]` from `backend/app/api/deps.py`.
 
 ### Service-First Business Logic
 
@@ -115,17 +108,13 @@ conditions and uncontrolled resource usage.
 
 ### Authentication Flow
 
-The backend issues JWT access and refresh tokens. The frontend uses NextAuth
-credentials flow to acquire, refresh, and inject those tokens into API requests.
+The dashboard may use NextAuth for session UX; API routes in this repo are
+open unless you add middleware or gateway auth in front of the FastAPI app.
 
 ## Data Model Snapshot
 
-- `User`
-  - Account identity and profile data
 - `Image`
-  - Uploaded file metadata and ownership
-- `Rating`
-  - Rating-related persistence for image scoring workflows
+  - Uploaded file metadata (no per-user ownership column)
 - `AIModel`
   - Stored model configuration and activation state
 - `AnalysisResult`

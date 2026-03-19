@@ -29,7 +29,6 @@ class CLIContext:
     """Runtime context for CLI commands."""
 
     base_url: str
-    token: str | None
     json_output: bool
     timeout: float
     verbose: bool
@@ -58,20 +57,14 @@ class ApiClient:
             return f"{stripped}/v1"
         return f"{stripped}/api/v1"
 
-    def _headers(self, require_auth: bool) -> dict[str, str]:
-        headers = {"Accept": "application/json"}
-        if self.ctx.token:
-            headers["Authorization"] = f"Bearer {self.ctx.token}"
-        if require_auth and "Authorization" not in headers:
-            raise CLIError("Missing token. Provide --token or IMAGE_RATING_TOKEN.", 3)
-        return headers
+    def _headers(self) -> dict[str, str]:
+        return {"Accept": "application/json"}
 
     def request(
         self,
         method: str,
         path: str,
         *,
-        require_auth: bool,
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
         files: list[tuple[str, tuple[str, Any, str]]] | None = None,
@@ -79,7 +72,7 @@ class ApiClient:
         timeout: float | None = None,
     ) -> Any:
         url = f"{self._normalize_base_url(self.ctx.base_url)}{path}"
-        headers = self._headers(require_auth)
+        headers = self._headers()
 
         # Keep verbose diagnostics off stdout so --json remains machine-readable.
         if self.ctx.verbose:
@@ -278,7 +271,6 @@ pass_cli_context = click.make_pass_decorator(CLIContext)
 
 @click.group()
 @click.option("--base-url", envvar="IMAGE_RATING_BASE_URL", default=DEFAULT_BASE_URL, show_default=True)
-@click.option("--token", envvar="IMAGE_RATING_TOKEN", default=None, help="Bearer access token")
 @click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
 @click.option("--timeout", default=DEFAULT_TIMEOUT_SECONDS, show_default=True, type=float)
 @click.option("--verbose", is_flag=True, help="Enable verbose debug output")
@@ -286,7 +278,6 @@ pass_cli_context = click.make_pass_decorator(CLIContext)
 def cli(
     click_ctx: click.Context,
     base_url: str,
-    token: str | None,
     json_output: bool,
     timeout: float,
     verbose: bool,
@@ -294,123 +285,10 @@ def cli(
     """Image Rating Server CLI."""
     click_ctx.obj = CLIContext(
         base_url=base_url,
-        token=token,
         json_output=json_output,
         timeout=timeout,
         verbose=verbose,
     )
-
-
-@cli.group()
-def auth() -> None:
-    """Authentication commands."""
-
-
-@auth.command("login")
-@click.option("--email", prompt=True)
-@click.option("--password", prompt=True, hide_input=True)
-@pass_cli_context
-def auth_login(ctx: CLIContext, email: str, password: str) -> None:
-    payload = ApiClient(ctx).request(
-        "POST",
-        "/auth/login",
-        require_auth=False,
-        json_body={"email": email, "password": password},
-    )
-    _emit(ctx, payload)
-
-
-@auth.command("refresh")
-@click.option("--refresh-token", prompt=True, hide_input=True)
-@pass_cli_context
-def auth_refresh(ctx: CLIContext, refresh_token: str) -> None:
-    payload = ApiClient(ctx).request(
-        "POST",
-        "/auth/refresh",
-        require_auth=False,
-        json_body={"refresh_token": refresh_token},
-    )
-    _emit(ctx, payload)
-
-
-@auth.command("logout")
-@pass_cli_context
-def auth_logout(ctx: CLIContext) -> None:
-    payload = ApiClient(ctx).request("POST", "/auth/logout", require_auth=True)
-    _emit(ctx, payload)
-
-
-@auth.command("me")
-@pass_cli_context
-def auth_me(ctx: CLIContext) -> None:
-    payload = ApiClient(ctx).request("GET", "/auth/me", require_auth=True)
-    _emit(ctx, payload)
-
-
-@cli.group()
-def users() -> None:
-    """User commands."""
-
-
-@users.command("me")
-@pass_cli_context
-def users_me(ctx: CLIContext) -> None:
-    payload = ApiClient(ctx).request("GET", "/users/me", require_auth=True)
-    _emit(ctx, payload)
-
-
-@users.command("update")
-@click.option("--email", default=None)
-@click.option("--full-name", default=None)
-@pass_cli_context
-def users_update(ctx: CLIContext, email: str | None, full_name: str | None) -> None:
-    body = {k: v for k, v in {"email": email, "full_name": full_name}.items() if v is not None}
-    if not body:
-        raise CLIError("Provide at least one field: --email or --full-name", 2)
-
-    payload = ApiClient(ctx).request(
-        "PATCH",
-        "/users/me",
-        require_auth=True,
-        json_body=body,
-    )
-    _emit(ctx, payload)
-
-
-@users.command("change-password")
-@click.option("--old-password", prompt=True, hide_input=True)
-@click.option("--new-password", prompt=True, hide_input=True)
-@pass_cli_context
-def users_change_password(ctx: CLIContext, old_password: str, new_password: str) -> None:
-    payload = ApiClient(ctx).request(
-        "POST",
-        "/users/me/change-password",
-        require_auth=True,
-        json_body={"old_password": old_password, "new_password": new_password},
-    )
-    _emit(ctx, payload)
-
-
-@users.command("list")
-@click.option("--page", default=1, type=int, show_default=True)
-@click.option("--page-size", default=20, type=int, show_default=True)
-@pass_cli_context
-def users_list(ctx: CLIContext, page: int, page_size: int) -> None:
-    payload = ApiClient(ctx).request(
-        "GET",
-        "/users/",
-        require_auth=True,
-        params={"page": page, "page_size": page_size},
-    )
-    _emit(ctx, payload)
-
-
-@users.command("get")
-@click.argument("user_id")
-@pass_cli_context
-def users_get(ctx: CLIContext, user_id: str) -> None:
-    payload = ApiClient(ctx).request("GET", f"/users/{user_id}", require_auth=True)
-    _emit(ctx, payload)
 
 
 @cli.group()
@@ -440,7 +318,7 @@ def images_list(
         params["date_from"] = date_from
     if date_to:
         params["date_to"] = date_to
-    payload = ApiClient(ctx).request("GET", "/images/", require_auth=True, params=params)
+    payload = ApiClient(ctx).request("GET", "/images/", params=params)
     _emit(ctx, payload)
 
 
@@ -448,7 +326,7 @@ def images_list(
 @click.argument("image_id")
 @pass_cli_context
 def images_get(ctx: CLIContext, image_id: str) -> None:
-    payload = ApiClient(ctx).request("GET", f"/images/{image_id}", require_auth=True)
+    payload = ApiClient(ctx).request("GET", f"/images/{image_id}")
     _emit(ctx, payload)
 
 
@@ -456,7 +334,7 @@ def images_get(ctx: CLIContext, image_id: str) -> None:
 @click.argument("image_id")
 @pass_cli_context
 def images_analysis(ctx: CLIContext, image_id: str) -> None:
-    payload = ApiClient(ctx).request("GET", f"/images/{image_id}/analysis", require_auth=True)
+    payload = ApiClient(ctx).request("GET", f"/images/{image_id}/analysis")
     _emit(ctx, payload)
 
 
@@ -478,7 +356,6 @@ def images_update(
     payload = ApiClient(ctx).request(
         "PATCH",
         f"/images/{image_id}",
-        require_auth=True,
         json_body=body,
     )
     _emit(ctx, payload)
@@ -488,7 +365,7 @@ def images_update(
 @click.argument("image_id")
 @pass_cli_context
 def images_delete(ctx: CLIContext, image_id: str) -> None:
-    payload = ApiClient(ctx).request("DELETE", f"/images/{image_id}", require_auth=True)
+    payload = ApiClient(ctx).request("DELETE", f"/images/{image_id}")
     _emit(ctx, payload)
 
 
@@ -501,7 +378,6 @@ def images_delete_batch(ctx: CLIContext, ids: str | None, ids_file: Path | None)
     payload = ApiClient(ctx).request(
         "POST",
         "/images/batch/delete",
-        require_auth=True,
         json_body={"image_ids": image_ids},
     )
     _emit(ctx, payload)
@@ -553,7 +429,6 @@ def upload_files(
         payload = ApiClient(ctx).request(
             "POST",
             "/upload",
-            require_auth=True,
             files=multipart_files,
             data=form_data,
             timeout=max(ctx.timeout, 120.0),
@@ -578,14 +453,14 @@ def ai_models() -> None:
 @ai_models.command("list")
 @pass_cli_context
 def ai_models_list(ctx: CLIContext) -> None:
-    payload = ApiClient(ctx).request("GET", "/ai/models", require_auth=False)
+    payload = ApiClient(ctx).request("GET", "/ai/models")
     _emit(ctx, payload)
 
 
 @ai_models.command("active")
 @pass_cli_context
 def ai_models_active(ctx: CLIContext) -> None:
-    payload = ApiClient(ctx).request("GET", "/ai/models/active", require_auth=False)
+    payload = ApiClient(ctx).request("GET", "/ai/models/active")
     _emit(ctx, payload)
 
 
@@ -596,7 +471,6 @@ def ai_models_activate(ctx: CLIContext, model_name: str) -> None:
     payload = ApiClient(ctx).request(
         "POST",
         "/ai/models/active",
-        require_auth=False,
         json_body={"model_name": model_name},
     )
     _emit(ctx, payload)
@@ -605,7 +479,7 @@ def ai_models_activate(ctx: CLIContext, model_name: str) -> None:
 @ai_models.command("deactivate")
 @pass_cli_context
 def ai_models_deactivate(ctx: CLIContext) -> None:
-    payload = ApiClient(ctx).request("DELETE", "/ai/models/active", require_auth=False)
+    payload = ApiClient(ctx).request("DELETE", "/ai/models/active")
     _emit(ctx, payload)
 
 
@@ -613,7 +487,7 @@ def ai_models_deactivate(ctx: CLIContext) -> None:
 @click.argument("model_name")
 @pass_cli_context
 def ai_models_get(ctx: CLIContext, model_name: str) -> None:
-    payload = ApiClient(ctx).request("GET", f"/ai/models/{model_name}", require_auth=False)
+    payload = ApiClient(ctx).request("GET", f"/ai/models/{model_name}")
     _emit(ctx, payload)
 
 
@@ -639,7 +513,6 @@ def ai_models_config_set(
     payload = ApiClient(ctx).request(
         "PUT",
         f"/ai/models/{model_name}/config",
-        require_auth=False,
         json_body={"config": config},
     )
     _emit(ctx, payload)
@@ -652,7 +525,6 @@ def ai_models_test_connection(ctx: CLIContext, model_name: str) -> None:
     payload = ApiClient(ctx).request(
         "POST",
         f"/ai/models/{model_name}/test-connection",
-        require_auth=False,
     )
     _emit(ctx, payload)
 
@@ -670,7 +542,6 @@ def ai_analyze_run(ctx: CLIContext, image_id: str, force_new: bool) -> None:
     payload = ApiClient(ctx).request(
         "POST",
         f"/ai/analyze/{image_id}",
-        require_auth=True,
         json_body={"force_new": force_new},
     )
     _emit(ctx, payload)
@@ -691,7 +562,6 @@ def ai_analyze_batch(
     payload = ApiClient(ctx).request(
         "POST",
         "/ai/analyze/batch",
-        require_auth=True,
         json_body={"image_ids": image_ids, "force_new": force_new},
         timeout=max(ctx.timeout, 300.0),
     )
@@ -708,7 +578,7 @@ def ai_prompts() -> None:
 @pass_cli_context
 def ai_prompts_list(ctx: CLIContext, model_name: str | None) -> None:
     params = {"model_name": model_name} if model_name else None
-    payload = ApiClient(ctx).request("GET", "/ai/prompts", require_auth=False, params=params)
+    payload = ApiClient(ctx).request("GET", "/ai/prompts", params=params)
     _emit(ctx, payload)
 
 
@@ -743,7 +613,6 @@ def ai_prompts_create(
     payload = ApiClient(ctx).request(
         "POST",
         "/ai/prompts",
-        require_auth=False,
         json_body={
             "model_name": model_name,
             "name": name,
@@ -762,7 +631,7 @@ def ai_prompts_create(
 @click.argument("prompt_id")
 @pass_cli_context
 def ai_prompts_get(ctx: CLIContext, prompt_id: str) -> None:
-    payload = ApiClient(ctx).request("GET", f"/ai/prompts/{prompt_id}", require_auth=False)
+    payload = ApiClient(ctx).request("GET", f"/ai/prompts/{prompt_id}")
     _emit(ctx, payload)
 
 
@@ -801,7 +670,6 @@ def ai_prompts_update(
     payload = ApiClient(ctx).request(
         "PATCH",
         f"/ai/prompts/{prompt_id}",
-        require_auth=False,
         json_body=body,
     )
     _emit(ctx, payload)
@@ -811,7 +679,7 @@ def ai_prompts_update(
 @click.argument("prompt_id")
 @pass_cli_context
 def ai_prompts_delete(ctx: CLIContext, prompt_id: str) -> None:
-    payload = ApiClient(ctx).request("DELETE", f"/ai/prompts/{prompt_id}", require_auth=False)
+    payload = ApiClient(ctx).request("DELETE", f"/ai/prompts/{prompt_id}")
     _emit(ctx, payload)
 
 
@@ -827,7 +695,6 @@ def ai_prompt_versions_list(ctx: CLIContext, prompt_id: str) -> None:
     payload = ApiClient(ctx).request(
         "GET",
         f"/ai/prompts/{prompt_id}/versions",
-        require_auth=False,
     )
     _emit(ctx, payload)
 
@@ -857,7 +724,6 @@ def ai_prompt_versions_create(
     payload = ApiClient(ctx).request(
         "POST",
         f"/ai/prompts/{prompt_id}/versions",
-        require_auth=False,
         json_body={
             "system_prompt": system_value,
             "user_prompt": user_value,
@@ -876,7 +742,6 @@ def ai_prompt_versions_get(ctx: CLIContext, prompt_id: str, version_id: str) -> 
     payload = ApiClient(ctx).request(
         "GET",
         f"/ai/prompts/{prompt_id}/versions/{version_id}",
-        require_auth=False,
     )
     _emit(ctx, payload)
 

@@ -12,7 +12,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import ActiveUser, get_db
+from app.api.deps import get_db
 from app.core.config import settings
 from app.models.image import Image
 from app.schemas.analyze import ImageAnalyzeRequest, ImageAnalyzeResponse
@@ -146,7 +146,7 @@ async def update_model_config_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model not found: {model_name}",
-    )
+        )
     return AIModelDetail(**model)
 
 
@@ -188,15 +188,13 @@ async def deactivate_model_endpoint(
 @router.post("/analyze/batch", response_model=BatchAnalyzeResponse)
 async def batch_analyze(
     request: BatchAnalyzeRequest,
-    current_user: ActiveUser = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BatchAnalyzeResponse:
     """
     Analyze multiple images in batch using the active AI model.
 
     Args:
         request: Batch analysis request with image IDs
-        current_user: Current authenticated user
         db: Database session
 
     Returns:
@@ -230,18 +228,16 @@ async def batch_analyze(
 @router.post("/analyze/{image_id}", response_model=ImageAnalyzeResponse)
 async def analyze_image(
     image_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
     request: ImageAnalyzeRequest = ImageAnalyzeRequest(),
-    current_user: ActiveUser = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> ImageAnalyzeResponse:
     """
     Analyze an image using the active AI model.
 
     Args:
         image_id: ID of the image to analyze
-        request: Analysis request options
-        current_user: Current authenticated user
         db: Database session
+        request: Analysis request options
 
     Returns:
         ImageAnalyzeResponse with analysis results
@@ -249,13 +245,9 @@ async def analyze_image(
     Raises:
         HTTPException: If no active model, image not found, or analysis fails
     """
-
-    # Verify user owns the image
+    # Find the image
     result = await db.execute(
-        select(Image).where(
-            Image.id == image_id,
-            Image.user_id == current_user["user_id"],
-        )
+        select(Image).where(Image.id == image_id)
     )
     image = result.scalar_one_or_none()
 

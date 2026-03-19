@@ -41,7 +41,6 @@ class ConcurrentUploadService:
         session_factory: SessionFactory,
         file: UploadFile,
         provided_hash: str | None,
-        user_id: str,
     ) -> UploadResult:
         """
         Process single upload with semaphore control.
@@ -53,7 +52,6 @@ class ConcurrentUploadService:
             session_factory: Factory function to create new database sessions
             file: UploadFile object
             provided_hash: Hash provided by client
-            user_id: User ID
 
         Returns:
             UploadResult
@@ -66,7 +64,6 @@ class ConcurrentUploadService:
                         db=db,
                         file=file,
                         provided_hash=provided_hash,
-                        user_id=user_id,
                     )
                 except Exception as e:
                     logger.error(f"Error in concurrent upload task: {e}")
@@ -118,7 +115,6 @@ class ConcurrentUploadService:
         session_factory: SessionFactory,
         files: list[UploadFile] | None,
         hashes_json: str | None,
-        user_id: str,
         auto_analyze: bool = False,
     ) -> UploadResponse:
         """
@@ -131,7 +127,6 @@ class ConcurrentUploadService:
             session_factory: Factory function to create new database sessions
             files: List of UploadFile objects (None or empty allowed)
             hashes_json: JSON string of hashes array
-            user_id: User ID
 
         Returns:
             UploadResponse with batch results
@@ -170,7 +165,6 @@ class ConcurrentUploadService:
                 session_factory=session_factory,
                 file=file,
                 provided_hash=hash_val,
-                user_id=user_id,
             )
             for file, hash_val in zip(files, hashes)
         ]

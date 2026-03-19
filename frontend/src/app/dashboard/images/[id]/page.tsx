@@ -112,10 +112,6 @@ export default function ImageDetailPage() {
     } catch (err) {
       const apiError = err as ApiError;
       setError(apiError.detail || "Failed to load image");
-      if (apiError.status === 401) {
-        // Already handled by api interceptor
-        return;
-      }
       if (apiError.status === 404) {
         setError("Image not found");
       }

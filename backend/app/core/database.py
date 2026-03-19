@@ -46,7 +46,7 @@ class SchemaMigration:
     apply: Callable[[AsyncConnection], Awaitable[bool]]
 
 
-LATEST_SCHEMA_VERSION = 5
+LATEST_SCHEMA_VERSION = 6
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -255,12 +255,105 @@ async def _migration_v5_add_analysis_prompt_metadata(conn: AsyncConnection) -> b
     return changed
 
 
+# Columns for rebuilt `images` table (no user_id). Order matches typical INSERT/SELECT.
+_IMAGES_TABLE_DDL = """
+    CREATE TABLE images__rebuild_no_user (
+        id VARCHAR(36) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        file_path VARCHAR(500) NOT NULL,
+        file_size INTEGER NOT NULL,
+        width INTEGER,
+        height INTEGER,
+        mime_type VARCHAR(100) NOT NULL,
+        hash_sha256 VARCHAR(64),
+        average_rating FLOAT,
+        rating_count INTEGER,
+        created_at DATETIME,
+        updated_at DATETIME,
+        PRIMARY KEY (id)
+    )
+"""
+_IMAGES_DATA_COLUMN_ORDER = (
+    "id",
+    "title",
+    "description",
+    "file_path",
+    "file_size",
+    "width",
+    "height",
+    "mime_type",
+    "hash_sha256",
+    "average_rating",
+    "rating_count",
+    "created_at",
+    "updated_at",
+)
+
+
+async def _rebuild_images_table_without_user_id(conn: AsyncConnection) -> None:
+    """
+    Remove user_id by recreating `images`.
+
+    SQLite's ``ALTER TABLE ... DROP COLUMN`` can fail with
+    "unknown column user_id in foreign key definition" when the stored table
+    SQL had an inline FK on ``user_id`` (e.g. REFERENCES users).
+    """
+    result = await conn.exec_driver_sql('PRAGMA table_info("images")')
+    existing = [row[1] for row in result.fetchall()]
+    if "user_id" not in existing:
+        return
+
+    copy_cols = [c for c in _IMAGES_DATA_COLUMN_ORDER if c in existing]
+    if not copy_cols or "id" not in copy_cols:
+        raise SQLAlchemyError("Cannot rebuild images: missing expected columns")
+
+    await conn.exec_driver_sql("DROP TABLE IF EXISTS images__rebuild_no_user")
+    await conn.exec_driver_sql(_IMAGES_TABLE_DDL)
+    cols_sql = ", ".join(f'"{c}"' for c in copy_cols)
+    await conn.exec_driver_sql(
+        f"INSERT INTO images__rebuild_no_user ({cols_sql}) SELECT {cols_sql} FROM images"
+    )
+    await conn.exec_driver_sql("DROP TABLE images")
+    await conn.exec_driver_sql("ALTER TABLE images__rebuild_no_user RENAME TO images")
+    try:
+        await conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_images_hash_sha256 ON images (hash_sha256)"
+        )
+    except SQLAlchemyError as e:
+        logger.warning("Could not recreate unique index ix_images_hash_sha256 after images rebuild: {}", e)
+
+
+async def _migration_v6_remove_users_and_image_owner(conn: AsyncConnection) -> bool:
+    """
+    Drop per-user tables and image.user_id (single-tenant, no User rows).
+
+    Order: ratings (FK to users/images) → rebuild images without user_id → users table.
+    """
+    changed = False
+
+    if await _has_table(conn, "ratings"):
+        await conn.exec_driver_sql("DROP TABLE IF EXISTS ratings")
+        changed = True
+
+    if await _has_table(conn, "images") and await _has_column(conn, "images", "user_id"):
+        await _rebuild_images_table_without_user_id(conn)
+        changed = True
+
+    if await _has_table(conn, "users"):
+        await conn.exec_driver_sql("DROP TABLE IF EXISTS users")
+        changed = True
+
+    return changed
+
+
 _SCHEMA_MIGRATIONS = (
     SchemaMigration(version=1, name="images.hash_sha256", apply=_migration_v1_add_images_hash),
     SchemaMigration(version=2, name="analysis_results table", apply=_migration_v2_create_analysis_results),
     SchemaMigration(version=3, name="ai_models.config_json", apply=_migration_v3_add_ai_model_config),
     SchemaMigration(version=4, name="ai prompt tables", apply=_migration_v4_create_ai_prompt_tables),
     SchemaMigration(version=5, name="analysis_results prompt metadata", apply=_migration_v5_add_analysis_prompt_metadata),
+    SchemaMigration(version=6, name="remove users and image.user_id", apply=_migration_v6_remove_users_and_image_owner),
 )
 
 

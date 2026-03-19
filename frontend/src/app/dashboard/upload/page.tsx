@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -59,9 +59,6 @@ const primaryButtonClass = 'bg-[#333333] text-white hover:bg-[#262626]'
 const destructiveButtonClass = 'bg-rose-500 text-white hover:bg-rose-600'
 
 function getUploadFailureMessage(status?: number): string {
-  if (status === 401 || status === 403) {
-    return 'Session expired or permission denied.'
-  }
   if (status === 422) {
     return 'The upload payload is invalid or the file is empty.'
   }

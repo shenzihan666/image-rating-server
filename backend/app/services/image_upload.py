@@ -74,7 +74,6 @@ class ImageUploadService:
         db: AsyncSession,
         file: UploadFile,
         provided_hash: str | None,
-        user_id: str,
     ) -> UploadResult:
         """
         Process a single file upload.
@@ -83,7 +82,6 @@ class ImageUploadService:
             db: Database session
             file: UploadFile object
             provided_hash: Hash provided by client
-            user_id: ID of uploading user
 
         Returns:
             UploadResult with status and metadata
@@ -145,7 +143,6 @@ class ImageUploadService:
             image_id = str(uuid.uuid4())
             image = Image(
                 id=image_id,
-                user_id=user_id,
                 title=original_filename,
                 description=None,
                 file_path=relative_path,

@@ -48,9 +48,9 @@ uv run pytest --cov=app --cov-report=html
 
 The `/api/v1/upload` endpoint tests cover:
 
-### Authentication Tests (`TestUploadEndpointAuthentication`)
-- Upload without authentication returns 401
-- Upload with invalid token returns 401
+### Access Control Notes
+- The current upload endpoint does not require built-in user authentication.
+- If gateway or middleware auth is added later, add the matching 401/403 tests here.
 
 ### Success Scenarios (`TestUploadEndpointSuccess`)
 - Single image upload success
@@ -85,13 +85,13 @@ The `/api/v1/upload` endpoint tests cover:
 
 ## Fixtures
 
-Key fixtures in `conftest.py`:
+Key fixtures used by the upload tests:
 
 - `async_client` - HTTP client for testing FastAPI app
-- `db_session` - Isolated database session per test
-- `test_user` - Creates a test user in database
-- `auth_headers` - Generates authentication headers
-- `test_image_path` - Path to test JPEG image
+- `db_session` - Isolated database session used by upload tests
+- `temp_upload_dir` - Temporary upload directory override
+- `test_db_path` - Per-test SQLite path
+- `test_image_path` - Writable path for the minimal JPEG sample
 - `sample_image_bytes` - Raw test image content
 
 ## Test Data

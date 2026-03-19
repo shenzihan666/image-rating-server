@@ -16,12 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.services.ai.models.qwen_vl.analyzer as qwen_analyzer_module
 from app.core.config import settings
 from app.core.database import Base, async_session_maker, engine
-from app.core.security import create_access_token, hash_password
 from app.models.ai_model import AIModel
 from app.models.ai_prompt import AIPrompt, AIPromptVersion
 from app.models.analysis_result import AnalysisResult
 from app.models.image import Image
-from app.models.user import User
 from app.services.ai.models.qwen_vl import QwenVLAnalyzer
 from app.services.ai.registry import AIModelRegistry
 
@@ -40,39 +38,13 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-
-
-@pytest.fixture
-async def test_user(db_session: AsyncSession) -> User:
-    """
-    Create and return a test user.
-    """
-    user = User(
-        id="ai-test-user-id",
-        email="ai-test@example.com",
-        full_name="AI Test User",
-        hashed_password=hash_password("testpassword123"),
-        is_active=True,
-    )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
-    return user
-
-
-@pytest.fixture
-def auth_headers(test_user: User) -> dict[str, str]:
-    """
-    Generate authentication headers for a test user.
-    """
-    token = create_access_token(data={"sub": test_user.id, "email": test_user.email})
-    return {"Authorization": f"Bearer {token}"}
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
 @pytest.fixture
 async def test_image(
     db_session: AsyncSession,
-    test_user: User,
     temp_upload_dir: Path,
 ) -> Image:
     """
@@ -83,7 +55,6 @@ async def test_image(
 
     image = Image(
         id="ai-test-image-id",
-        user_id=test_user.id,
         title="Sample",
         description="Sample image",
         file_path="sample.jpg",
@@ -133,7 +104,6 @@ def reset_ai_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_analyze_image_saves_result_without_signature_error(
     async_client: AsyncClient,
     db_session: AsyncSession,
-    auth_headers: dict[str, str],
     test_image: Image,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -148,7 +118,6 @@ async def test_analyze_image_saves_result_without_signature_error(
 
     response = await async_client.post(
         f"/api/v1/ai/analyze/{test_image.id}",
-        headers=auth_headers,
         json={"force_new": True},
     )
 
@@ -172,7 +141,6 @@ async def test_analyze_image_saves_result_without_signature_error(
 @pytest.mark.asyncio
 async def test_batch_analyze_route_is_not_captured_by_single_image_route(
     async_client: AsyncClient,
-    auth_headers: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
@@ -190,7 +158,6 @@ async def test_batch_analyze_route_is_not_captured_by_single_image_route(
 
     response = await async_client.post(
         "/api/v1/ai/analyze/batch",
-        headers=auth_headers,
         json={"image_ids": ["img-1", "img-2"], "force_new": False},
     )
 
@@ -202,7 +169,6 @@ async def test_batch_analyze_route_is_not_captured_by_single_image_route(
 async def test_get_image_analysis_returns_latest_saved_result(
     async_client: AsyncClient,
     db_session: AsyncSession,
-    auth_headers: dict[str, str],
     test_image: Image,
 ) -> None:
     """
@@ -224,7 +190,6 @@ async def test_get_image_analysis_returns_latest_saved_result(
 
     response = await async_client.get(
         f"/api/v1/images/{test_image.id}/analysis",
-        headers=auth_headers,
     )
 
     assert response.status_code == 200
@@ -239,7 +204,6 @@ async def test_get_image_analysis_returns_latest_saved_result(
 @pytest.mark.asyncio
 async def test_get_image_analysis_returns_404_when_missing(
     async_client: AsyncClient,
-    auth_headers: dict[str, str],
     test_image: Image,
 ) -> None:
     """
@@ -247,7 +211,6 @@ async def test_get_image_analysis_returns_404_when_missing(
     """
     response = await async_client.get(
         f"/api/v1/images/{test_image.id}/analysis",
-        headers=auth_headers,
     )
 
     assert response.status_code == 404
@@ -255,41 +218,18 @@ async def test_get_image_analysis_returns_404_when_missing(
 
 
 @pytest.mark.asyncio
-async def test_analyze_image_returns_404_for_non_owner(
+async def test_analyze_image_returns_404_when_image_missing(
     async_client: AsyncClient,
-    db_session: AsyncSession,
-    auth_headers: dict[str, str],
-    temp_upload_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """
-    POST /api/v1/ai/analyze/{image_id} should not allow analyzing another user's image.
-    """
-    image_path = temp_upload_dir / "other-user.jpg"
-    image_path.write_bytes(b"other-user-image")
-    other_user_image = Image(
-        id="ai-other-user-image-id",
-        user_id="other-user-id",
-        title="Other user image",
-        description="Belongs to someone else",
-        file_path="other-user.jpg",
-        file_size=image_path.stat().st_size,
-        width=100,
-        height=100,
-        mime_type="image/jpeg",
-        hash_sha256="other-user-hash",
-    )
-    db_session.add(other_user_image)
-    await db_session.commit()
-
+    """POST /api/v1/ai/analyze/{image_id} returns 404 when the image id does not exist."""
     async def fake_get_active() -> FakeAnalyzer:
         return FakeAnalyzer()
 
     monkeypatch.setattr(AIModelRegistry, "get_active", fake_get_active)
 
     response = await async_client.post(
-        f"/api/v1/ai/analyze/{other_user_image.id}",
-        headers=auth_headers,
+        "/api/v1/ai/analyze/00000000-0000-0000-0000-000000000000",
         json={"force_new": True},
     )
 

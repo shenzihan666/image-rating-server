@@ -83,9 +83,6 @@ export default function ImagesPage() {
     } catch (err) {
       const apiError = err as ApiError;
       setError(apiError.detail || "Failed to load images");
-      if (apiError.status === 401) {
-        return;
-      }
     } finally {
       setLoading(false);
     }

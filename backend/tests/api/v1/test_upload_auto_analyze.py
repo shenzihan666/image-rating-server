@@ -22,10 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import Base, async_session_maker, engine
-from app.core.security import create_access_token
 from app.models.analysis_result import AnalysisResult
 from app.models.image import Image
-from app.models.user import User
 
 
 # ---------------------------------------------------------------------------
@@ -63,29 +61,8 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         await session.rollback()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-
-
-@pytest.fixture
-async def test_user(db_session: AsyncSession) -> User:
-    from app.core.security import hash_password
-
-    user = User(
-        id="aa-test-user",
-        email="aa@example.com",
-        full_name="AA Test User",
-        hashed_password=hash_password("password"),
-        is_active=True,
-    )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
-    return user
-
-
-@pytest.fixture
-def auth_headers(test_user: User) -> dict[str, str]:
-    token = create_access_token(data={"sub": test_user.id, "email": test_user.email})
-    return {"Authorization": f"Bearer {token}"}
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
 # Monkeypatch upload dir so tests don't pollute the real filesystem.
@@ -148,11 +125,10 @@ class TestAutoAnalyzeFlag:
     async def test_upload_without_auto_analyze_succeeds(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
     ) -> None:
         """Baseline: no auto_analyze param → upload still works."""
         files = {"images": ("img.jpg", _unique_jpeg("no_aa"), "image/jpeg")}
-        resp = await async_client.post("/api/v1/upload", files=files, headers=auth_headers)
+        resp = await async_client.post("/api/v1/upload", files=files)
         assert resp.status_code == 200
         assert resp.json()["succeeded"] == 1
 
@@ -160,13 +136,12 @@ class TestAutoAnalyzeFlag:
     async def test_upload_with_auto_analyze_false_succeeds(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
     ) -> None:
         """Explicit auto_analyze=false → same as default."""
         files = {"images": ("img.jpg", _unique_jpeg("aa_false"), "image/jpeg")}
         data = {"auto_analyze": "false"}
         resp = await async_client.post(
-            "/api/v1/upload", files=files, data=data, headers=auth_headers
+            "/api/v1/upload", files=files, data=data
         )
         assert resp.status_code == 200
         assert resp.json()["succeeded"] == 1
@@ -175,7 +150,6 @@ class TestAutoAnalyzeFlag:
     async def test_upload_with_auto_analyze_true_no_model_still_succeeds(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
     ) -> None:
         """auto_analyze=true but no active model → upload succeeds, analysis skipped."""
         with patch(
@@ -185,7 +159,7 @@ class TestAutoAnalyzeFlag:
             files = {"images": ("img.jpg", _unique_jpeg("aa_no_model"), "image/jpeg")}
             data = {"auto_analyze": "true"}
             resp = await async_client.post(
-                "/api/v1/upload", files=files, data=data, headers=auth_headers
+                "/api/v1/upload", files=files, data=data
             )
 
         assert resp.status_code == 200
@@ -196,7 +170,6 @@ class TestAutoAnalyzeFlag:
     async def test_upload_with_auto_analyze_true_and_active_model_saves_result(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         db_session: AsyncSession,
     ) -> None:
         """auto_analyze=true with active model → analysis result saved in DB."""
@@ -209,7 +182,7 @@ class TestAutoAnalyzeFlag:
             files = {"images": ("img.jpg", _unique_jpeg("aa_with_model"), "image/jpeg")}
             data = {"auto_analyze": "true"}
             resp = await async_client.post(
-                "/api/v1/upload", files=files, data=data, headers=auth_headers
+                "/api/v1/upload", files=files, data=data
             )
 
         assert resp.status_code == 200
@@ -234,7 +207,6 @@ class TestAutoAnalyzeFlag:
     async def test_auto_analyze_skips_duplicates(
         self,
         async_client: AsyncClient,
-        auth_headers: dict[str, str],
         db_session: AsyncSession,
     ) -> None:
         """auto_analyze=true should NOT trigger analysis for duplicate uploads."""
@@ -249,7 +221,7 @@ class TestAutoAnalyzeFlag:
             files = {"images": ("img.jpg", img_bytes, "image/jpeg")}
             data = {"auto_analyze": "true"}
             resp1 = await async_client.post(
-                "/api/v1/upload", files=files, data=data, headers=auth_headers
+                "/api/v1/upload", files=files, data=data
             )
         assert resp1.json()["succeeded"] == 1
 
@@ -268,7 +240,7 @@ class TestAutoAnalyzeFlag:
             files = {"images": ("img.jpg", img_bytes, "image/jpeg")}
             data = {"auto_analyze": "true"}
             resp2 = await async_client.post(
-                "/api/v1/upload", files=files, data=data, headers=auth_headers
+                "/api/v1/upload", files=files, data=data
             )
         assert resp2.json()["duplicated"] == 1
 
@@ -367,7 +339,6 @@ class TestAutoAnalyzeUploadClientStandalone:
             result = await mod.upload_image_for_review(
                 img,
                 server_url="http://fake-server:8000",
-                token="test-token",
                 auto_analyze=True,
             )
 
@@ -414,7 +385,6 @@ class TestAutoAnalyzeUploadClientStandalone:
             result = await mod.upload_image_for_review(
                 img,
                 server_url="http://fake-server:8000",
-                token="bad-token",
             )
 
         assert result is False

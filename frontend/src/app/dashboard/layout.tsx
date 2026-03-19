@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useSession, signOut } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -9,13 +8,11 @@ import {
   LayoutDashboard,
   Upload,
   Settings,
-  LogOut,
   ChevronLeft,
   ChevronRight,
   Menu,
   X,
   Bot,
-  Loader2,
   Image as ImageIcon,
   MessageSquareText,
 } from "lucide-react";
@@ -38,33 +35,9 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
   const pathname = usePathname();
-  const { status } = useSession();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-
-  // Handle loading state
-  if (status === "loading") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F5F5F5]">
-        <div className="text-center">
-          <Loader2 className="w-10 h-10 animate-spin mx-auto text-[#333333]" />
-          <p className="mt-4 text-[#333333]/60">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Handle unauthenticated state - middleware should redirect, but this is a fallback
-  if (status === "unauthenticated") {
-    router.push("/login");
-    return null;
-  }
-
-  const handleLogout = async () => {
-    await signOut({ callbackUrl: "/login" });
-  };
 
   const isNavItemActive = (href: string) => {
     if (href === "/dashboard") {
@@ -99,12 +72,7 @@ export default function DashboardLayout({
           <span className="font-semibold text-[#333333]">Image Rating</span>
         </div>
 
-        <button
-          onClick={handleLogout}
-          className="p-2 hover:bg-[#E0E0E0] rounded-lg transition-colors cursor-pointer"
-        >
-          <LogOut className="w-5 h-5 text-[#333333]" />
-        </button>
+        <div className="w-9" />
       </header>
 
       {/* Mobile Sidebar Overlay */}
@@ -159,19 +127,7 @@ export default function DashboardLayout({
                     </Link>
                   );
                 })}
-
-                <div className="pt-4 mt-4 border-t border-[#E0E0E0]" />
               </nav>
-
-              <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-[#E0E0E0]">
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-[#333333]/70 hover:bg-red-50 hover:text-red-600 transition-all cursor-pointer"
-                >
-                  <LogOut className="w-5 h-5" />
-                  <span className="font-medium">Logout</span>
-                </button>
-              </div>
             </motion.aside>
           </>
         )}
@@ -249,7 +205,7 @@ export default function DashboardLayout({
           </nav>
 
           {/* Bottom Section */}
-          <div className="p-4 border-t border-[#E0E0E0] space-y-1">
+          <div className="p-4 border-t border-[#E0E0E0]">
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
               className={`flex items-center gap-3 px-4 py-3 w-full rounded-xl text-[#333333]/70 hover:bg-[#E0E0E0] hover:text-[#333333] transition-all cursor-pointer ${
@@ -264,27 +220,6 @@ export default function DashboardLayout({
                   <span className="font-medium">Collapse</span>
                 </>
               )}
-            </button>
-
-            <button
-              onClick={handleLogout}
-              className={`flex items-center gap-3 px-4 py-3 w-full rounded-xl text-[#333333]/70 hover:bg-red-50 hover:text-red-600 transition-all cursor-pointer ${
-                isCollapsed ? "justify-center" : ""
-              }`}
-            >
-              <LogOut className="w-5 h-5" />
-              <AnimatePresence mode="wait">
-                {!isCollapsed && (
-                  <motion.span
-                    initial={{ opacity: 0, width: 0 }}
-                    animate={{ opacity: 1, width: "auto" }}
-                    exit={{ opacity: 0, width: 0 }}
-                    className="font-medium whitespace-nowrap overflow-hidden"
-                  >
-                    Logout
-                  </motion.span>
-                )}
-              </AnimatePresence>
             </button>
           </div>
         </div>
