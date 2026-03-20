@@ -5,55 +5,29 @@ const allowedDevOrigins = rawAllowedDevOrigins
   ? rawAllowedDevOrigins.split(",").map((host) => host.trim()).filter(Boolean)
   : [];
 
-type UploadsRemotePattern = {
-  protocol: "http" | "https";
-  hostname: string;
-  port?: string;
-  pathname: string;
-};
-
-function uploadsRemotePatterns(): UploadsRemotePattern[] {
-  const raw = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  try {
-    const u = new URL(raw);
-    const protocol = u.protocol === "https:" ? "https" : "http";
-    const pattern: UploadsRemotePattern = {
-      protocol,
-      hostname: u.hostname,
-      pathname: "/uploads/**",
-    };
-    if (u.port) {
-      pattern.port = u.port;
-    }
-    return [pattern];
-  } catch {
-    return [
-      {
-        protocol: "http",
-        hostname: "localhost",
-        port: "8080",
-        pathname: "/uploads/**",
-      },
-    ];
-  }
+/** Where the Next.js process reaches the FastAPI app (never a public browser URL). */
+function backendBase(): string {
+  return (
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://127.0.0.1:8080"
+  ).replace(/\/$/, "");
 }
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  images: {
-    remotePatterns: uploadsRemotePatterns(),
-  },
   ...(allowedDevOrigins?.length ? { allowedDevOrigins } : {}),
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080",
-  },
   async rewrites() {
+    const base = backendBase();
     return [
       {
-        // Only proxy backend v1 API routes, preserve NextAuth /api/auth/* routes
         source: "/api/v1/:path*",
-        destination: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/api/v1/:path*`,
+        destination: `${base}/api/v1/:path*`,
+      },
+      {
+        source: "/uploads/:path*",
+        destination: `${base}/uploads/:path*`,
       },
     ];
   },

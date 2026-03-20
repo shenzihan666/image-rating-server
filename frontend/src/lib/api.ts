@@ -12,9 +12,16 @@ import type {
   BatchDeleteResponse,
 } from '@/types'
 
-// API base URL from environment variable
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 const BATCH_ANALYZE_TIMEOUT_MS = 5 * 60 * 1000
+
+/** Backend URL only for server-side requests; browser uses same-origin `/api/v1` via rewrites. */
+function resolveServerBackendBase(): string {
+  return (
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    'http://127.0.0.1:8080'
+  ).replace(/\/$/, '')
+}
 
 // API response interface
 export interface ApiResponse<T = unknown> {
@@ -33,13 +40,18 @@ export interface ApiError {
  */
 const createApiClient = (): AxiosInstance => {
   const client = axios.create({
-    baseURL: `${API_URL}/api/v1`,
     timeout: 30000,
   })
 
-  // Request interceptor - handle FormData content-type
+  // Request interceptor - same-origin API in the browser; absolute URL on the server only
   client.interceptors.request.use(
     async (config) => {
+      const base =
+        typeof window !== 'undefined'
+          ? '/api/v1'
+          : `${resolveServerBackendBase()}/api/v1`
+      config.baseURL = base
+
       // Let browser/axios set multipart boundaries automatically for FormData.
       if (typeof FormData !== 'undefined' && config.data instanceof FormData && config.headers) {
         if (

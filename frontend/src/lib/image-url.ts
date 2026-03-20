@@ -3,14 +3,12 @@
  */
 
 /**
- * Get the full URL for an uploaded image file.
+ * Public path for an uploaded image (same-origin; Next rewrites `/uploads/*` to the API).
  *
  * @param filePath - Relative file path (e.g., "2025/03/06/uuid.jpg")
- * @returns Full URL to the image
  */
 export function getImageUrl(filePath: string): string {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  return `${apiUrl}/uploads/${filePath}`;
+  return `/uploads/${filePath}`;
 }
 
 /**

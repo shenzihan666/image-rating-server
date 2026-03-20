@@ -23,7 +23,7 @@ Use `backend/.env.example` as the starting template.
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access-token lifetime | `30` |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh-token lifetime | `7` |
 | `FRONTEND_URL` | Primary frontend origin | `http://localhost:8081` |
-| `ALLOWED_ORIGINS` | CORS allowlist | Comma-separated URLs |
+| `ALLOWED_ORIGINS` | CORS allowlist | Comma-separated origins; with the default Next proxy, browsers call `/api/v1` on the frontend origin, so CORS is often unnecessary for that path |
 | `DATABASE_URL` | SQLAlchemy database URL | SQLite by default |
 | `DATABASE_ECHO` | SQL logging toggle | `false` |
 | `LOG_LEVEL` | Runtime log level | `INFO` |
@@ -42,7 +42,8 @@ Create `frontend/.env.local` for local overrides.
 
 | Variable | Purpose | Default / Note |
 | --- | --- | --- |
-| `NEXT_PUBLIC_API_URL` | Backend base URL for browser and server calls | `http://localhost:8080` |
+| `BACKEND_URL` | URL the **Next.js server** uses to proxy `/api/v1/*` and `/uploads/*` to FastAPI | Falls back to `NEXT_PUBLIC_API_URL`, then `http://127.0.0.1:8080` |
+| `NEXT_PUBLIC_API_URL` | Optional fallback for `BACKEND_URL` when unset (not required in the browser for API calls) | e.g. `http://localhost:8080` for local dev |
 | `NEXT_ALLOWED_DEV_ORIGINS` | Dev-only: hostnames allowed to load `/_next/*` when not using localhost (comma-separated) | e.g. `47.113.187.234` or `dev.example.com` |
 | `AUTH_SECRET` | Preferred NextAuth secret | Optional but recommended |
 | `NEXTAUTH_SECRET` | Fallback NextAuth secret | Used when `AUTH_SECRET` is absent |
@@ -51,4 +52,4 @@ Create `frontend/.env.local` for local overrides.
 
 - Backend model config may be persisted in the database
 - Backend `.env` values act as runtime fallback defaults
-- Frontend environment values only affect frontend runtime behavior and API target
+- Frontend: the browser calls **same-origin** `/api/v1` and `/uploads`; set `BACKEND_URL` (or `NEXT_PUBLIC_API_URL`) so the Next process can reach the API on whatever host/port it listens (localhost, Docker service name, `127.0.0.1`, etc.)—no fixed public IP in the client bundle
