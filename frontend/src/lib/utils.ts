@@ -1,3 +1,5 @@
+import { sha256 } from "@noble/hashes/sha2";
+import { bytesToHex } from "@noble/hashes/utils";
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -53,13 +55,19 @@ export function formatFileSize(bytes: number): string {
 }
 
 /**
- * Compute SHA256 hash of a file
+ * Compute SHA256 hash of a file.
+ * Uses Web Crypto when available (HTTPS/localhost); otherwise @noble/hashes
+ * so uploads still work on plain HTTP where `crypto.subtle` is undefined.
  */
 export async function computeFileHash(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  const subtle = globalThis.crypto?.subtle;
+  if (subtle) {
+    const hashBuffer = await subtle.digest("SHA-256", arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return bytesToHex(sha256(new Uint8Array(arrayBuffer)));
 }
 
 /**
