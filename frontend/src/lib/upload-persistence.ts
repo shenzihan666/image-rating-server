@@ -1,4 +1,4 @@
-﻿import type { UploadListItem, UploadResult } from "@/types";
+import type { UploadListItem, UploadResult } from "@/types";
 
 const META_KEY = "uploadInboxMeta";
 const DB_NAME = "image-rating-upload-db";
@@ -134,7 +134,9 @@ export async function saveUploadInbox(items: UploadListItem[]): Promise<void> {
     return;
   }
 
-  const metaItems: StoredUploadMeta[] = items.map(({ file, preview, ...item }) => item);
+  const metaItems: StoredUploadMeta[] = items.map(
+    ({ file: _file, preview: _preview, ...item }) => item
+  );
   localStorage.setItem(META_KEY, JSON.stringify(metaItems));
 
   const db = await openDatabase();

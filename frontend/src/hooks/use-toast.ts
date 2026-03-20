@@ -12,7 +12,7 @@ type ToasterToast = {
   description?: React.ReactNode;
   action?: React.ReactNode;
   open?: boolean;
-  onOpenChange?: (open: boolean) => void;
+  onOpenChange?: (_open: boolean) => void;
 };
 
 const actionTypes = {
@@ -124,7 +124,7 @@ export const reducer = (state: State, action: Action): State => {
   }
 };
 
-const listeners: Array<(state: State) => void> = [];
+const listeners: Array<(_state: State) => void> = [];
 
 let memoryState: State = { toasts: [] };
 

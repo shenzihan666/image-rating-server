@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Image from 'next/image'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   AlertTriangle,
@@ -721,10 +722,13 @@ export default function UploadPage() {
 
                       <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl border border-[#E0E0E0] bg-[#EFEFEF]">
                         {item.preview ? (
-                          <img
+                          <Image
                             src={item.preview}
                             alt={item.file_name}
-                            className="h-full w-full object-cover"
+                            fill
+                            className="object-cover"
+                            unoptimized
+                            sizes="56px"
                           />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center">

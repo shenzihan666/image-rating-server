@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
+import NextImage from "next/image";
 
 import { imageApi, aiAnalyzeApi, type ApiError } from "@/lib/api";
 import { getImageUrl } from "@/lib/image-url";
@@ -297,11 +298,14 @@ export default function ImageDetailPage() {
           animate={{ opacity: 1, y: 0 }}
           className="glass-card rounded-2xl p-4"
         >
-          <div className="aspect-square bg-[#E0E0E0] rounded-xl overflow-hidden">
-            <img
+          <div className="relative aspect-square bg-[#E0E0E0] rounded-xl overflow-hidden">
+            <NextImage
               src={getImageUrl(image.file_path)}
               alt={image.title}
-              className="w-full h-full object-contain"
+              fill
+              className="object-contain"
+              sizes="(max-width: 1024px) 100vw, 50vw"
+              priority
             />
           </div>
         </motion.div>

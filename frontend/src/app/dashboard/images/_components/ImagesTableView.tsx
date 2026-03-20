@@ -1,5 +1,6 @@
 "use client";
 
+import NextImage from "next/image";
 import { motion } from "framer-motion";
 import { Check, Sparkles } from "lucide-react";
 
@@ -74,16 +75,17 @@ export function ImagesTableView({
             )}
 
             <div
-              className="w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0 bg-[#E0E0E0] rounded-xl overflow-hidden"
+              className="relative w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0 bg-[#E0E0E0] rounded-xl overflow-hidden"
               onClick={() =>
                 selectionMode ? onSelectImage(image.id) : onOpenDetail(image.id)
               }
             >
-              <img
+              <NextImage
                 src={getImageUrl(image.file_path)}
                 alt={image.title}
-                className="w-full h-full object-cover"
-                loading="lazy"
+                fill
+                className="object-cover"
+                sizes="96px"
               />
             </div>
 

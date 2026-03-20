@@ -43,6 +43,7 @@ Create `frontend/.env.local` for local overrides.
 | Variable | Purpose | Default / Note |
 | --- | --- | --- |
 | `NEXT_PUBLIC_API_URL` | Backend base URL for browser and server calls | `http://localhost:8080` |
+| `NEXT_ALLOWED_DEV_ORIGINS` | Dev-only: hostnames allowed to load `/_next/*` when not using localhost (comma-separated) | e.g. `47.113.187.234` or `dev.example.com` |
 | `AUTH_SECRET` | Preferred NextAuth secret | Optional but recommended |
 | `NEXTAUTH_SECRET` | Fallback NextAuth secret | Used when `AUTH_SECRET` is absent |
 

@@ -43,10 +43,10 @@ const createApiClient = (): AxiosInstance => {
       // Let browser/axios set multipart boundaries automatically for FormData.
       if (typeof FormData !== 'undefined' && config.data instanceof FormData && config.headers) {
         if (
-          typeof (config.headers as { set?: (name: string, value?: string) => void }).set ===
+          typeof (config.headers as { set?: (_name: string, _value?: string) => void }).set ===
           'function'
         ) {
-          ;(config.headers as { set: (name: string, value?: string) => void }).set(
+          ;(config.headers as { set: (_name: string, _value?: string) => void }).set(
             'Content-Type',
             undefined
           )
@@ -265,7 +265,7 @@ export const aiPromptApi = {
 /**
  * Upload progress callback type
  */
-export type UploadProgressCallback = (progress: number) => void
+export type UploadProgressCallback = (_progress: number) => void
 
 /**
  * Upload API

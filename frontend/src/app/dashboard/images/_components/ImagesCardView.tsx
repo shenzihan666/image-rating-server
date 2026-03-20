@@ -1,5 +1,6 @@
 "use client";
 
+import NextImage from "next/image";
 import { motion } from "framer-motion";
 import { Check, Sparkles } from "lucide-react";
 
@@ -56,11 +57,12 @@ export function ImagesCardView({
         >
           <div className="flex flex-col">
             <div className="relative aspect-square w-full bg-[#E0E0E0]">
-              <img
+              <NextImage
                 src={getImageUrl(image.file_path)}
                 alt={image.title}
-                className="h-full w-full object-cover"
-                loading="lazy"
+                fill
+                className="object-cover"
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
               />
               {selectionMode && (
                 <button
