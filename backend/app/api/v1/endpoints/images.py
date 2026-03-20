@@ -22,6 +22,7 @@ from app.services.image import ImageService
 router = APIRouter()
 
 
+@router.get("", response_model=ImageListResponse, include_in_schema=False)
 @router.get("/", response_model=ImageListResponse)
 async def list_images(
     db: Annotated[AsyncSession, Depends(get_db)],

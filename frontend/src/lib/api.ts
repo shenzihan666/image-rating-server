@@ -325,7 +325,8 @@ export const imageApi = {
     search?: string
     date_from?: string
     date_to?: string
-  }) => api.get<PaginatedResponse<Image>>('/images', { params }),
+  }) =>
+    api.get<PaginatedResponse<Image>>('/images/', { params }),
 
   getImage: (id: string) => api.get<Image>(`/images/${id}`),
 
