@@ -17,12 +17,13 @@ import {
   Sparkles,
   AlertCircle,
 } from "lucide-react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import NextImage from "next/image";
 
 import { imageApi, aiAnalyzeApi, type ApiError } from "@/lib/api";
 import { getImageUrl } from "@/lib/image-url";
+import { resolveRouteSegment } from "@/lib/route-params";
 import { cn, formatDateTime, formatFileSize } from "@/lib/utils";
 import type { Image } from "@/types";
 
@@ -67,7 +68,12 @@ function titleizeKey(key: string): string {
 export default function ImageDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const imageId = params.id as string;
+  const pathname = usePathname();
+  const imageId = resolveRouteSegment({
+    param: params.id,
+    pathname,
+    pattern: /\/dashboard\/images\/([^/]+)\/?$/,
+  });
   const [image, setImage] = useState<Image | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +89,12 @@ export default function ImageDetailPage() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   const fetchImage = useCallback(async () => {
+    if (!imageId.trim()) {
+      setLoading(false);
+      setError("Invalid or missing image link.");
+      setImage(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     setAnalysisError(null);

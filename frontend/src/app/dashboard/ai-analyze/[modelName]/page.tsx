@@ -4,25 +4,19 @@ import { useParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
-import { AIModelConfigPageContent } from "../_components/AIModelConfigPageContent";
+import { resolveRouteSegment } from "@/lib/route-params";
 
-function resolveModelNameFromPath(pathname: string): string {
-  const match = pathname.match(/\/ai-analyze\/([^/]+)\/?$/);
-  return match?.[1] ? decodeURIComponent(match[1]) : "";
-}
+import { AIModelConfigPageContent } from "../_components/AIModelConfigPageContent";
 
 export default function AIModelConfigPage() {
   const params = useParams();
   const pathname = usePathname();
 
-  const fromParams =
-    typeof params.modelName === "string"
-      ? decodeURIComponent(params.modelName)
-      : Array.isArray(params.modelName) && params.modelName[0]
-        ? decodeURIComponent(params.modelName[0])
-        : "";
-
-  const modelName = fromParams || resolveModelNameFromPath(pathname);
+  const modelName = resolveRouteSegment({
+    param: params.modelName,
+    pathname,
+    pattern: /\/dashboard\/ai-analyze\/([^/]+)\/?$/,
+  });
 
   if (!modelName) {
     return (

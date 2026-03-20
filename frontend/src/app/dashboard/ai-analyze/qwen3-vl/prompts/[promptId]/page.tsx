@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -21,6 +21,7 @@ import {
   type AIPromptVersionSummary,
   type ApiError,
 } from "@/lib/api";
+import { resolveRouteSegment } from "@/lib/route-params";
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleString();
@@ -28,7 +29,14 @@ function formatDate(value: string): string {
 
 export default function QwenPromptDetailPage() {
   const params = useParams();
-  const promptId = decodeURIComponent(params.promptId as string);
+  const pathname = usePathname();
+
+  const promptId = resolveRouteSegment({
+    param: params.promptId,
+    pathname,
+    pattern: /\/prompts\/([^/]+)\/?$/,
+    reject: ["new"],
+  });
   const [prompt, setPrompt] = useState<AIPromptDetail | null>(null);
   const [versions, setVersions] = useState<AIPromptVersionSummary[]>([]);
   const [name, setName] = useState("");
@@ -59,6 +67,12 @@ export default function QwenPromptDetailPage() {
   }, []);
 
   const fetchPrompt = useCallback(async () => {
+    if (!promptId.trim()) {
+      setLoading(false);
+      setPrompt(null);
+      setError("Invalid or missing prompt id.");
+      return;
+    }
     try {
       setLoading(true);
       const [promptResponse, versionsResponse] = await Promise.all([

@@ -203,6 +203,7 @@ export default function QwenPromptLibraryPage() {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Link
+                        prefetch={false}
                         href={`/dashboard/ai-analyze/qwen3-vl/prompts/${encodeURIComponent(prompt.id)}`}
                         className="inline-flex items-center gap-2 rounded-xl border border-[#E0E0E0] px-4 py-2 text-sm font-medium text-[#333333] transition-colors hover:bg-[#EAEAEA]"
                       >
