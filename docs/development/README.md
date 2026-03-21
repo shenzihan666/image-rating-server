@@ -9,8 +9,8 @@ conventions.
   - Daily development, validation, and startup commands
 - [CLI Usage](./cli-usage.md)
   - End-to-end usage guide for `irs` business API CLI
-- [MCP Server](./mcp-server.md)
-  - MCP integration for AI agents (OpenClaw, Claude Desktop, etc.)
+- [AI Agent Integration](./how_to_use_skills.md)
+  - OpenClaw Skill for AI agent integration
 - [Environment](./environment.md)
   - Ports, URLs, and runtime variables
 - [Conventions](./conventions.md)
