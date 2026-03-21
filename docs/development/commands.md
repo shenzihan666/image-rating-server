@@ -47,6 +47,43 @@ uv run irs ai prompts update <PROMPT_ID> --inactive
 uv run irs --token <ACCESS_TOKEN> ai analyze batch --ids img1,img2 --force-new
 ```
 
+## MCP Server (AI Agent Integration)
+
+Run from `backend/`:
+
+```bash
+# Start MCP server (stdio transport, for local AI agents like OpenClaw)
+uv run irs-mcp
+
+# Or run as a Python module
+uv run python -m app.mcp_server
+```
+
+### OpenClaw Configuration
+
+Add this to `~/.config/openclaw/openclaw.json5`:
+
+```json5
+{
+  mcp: {
+    servers: {
+      "image-rating": {
+        command: "uv",
+        args: ["run", "irs-mcp"],
+        cwd: "/path/to/image-rating-server/backend"
+      }
+    }
+  }
+}
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `IMAGE_RATING_BASE_URL` | `http://localhost:8080` | Backend API base URL |
+| `IMAGE_RATING_TIMEOUT` | `30` | Default request timeout (seconds) |
+
 ## Frontend
 
 Run these from `frontend/`:

@@ -29,6 +29,7 @@ dependencies = [
     "aiofiles>=24.1.0",
     "openai>=2.26.0",
     "httpx>=0.28.0",
+    "mcp[cli]>=1.0.0",
 ]
 
 [dependency-groups]
@@ -48,6 +49,7 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 irs = "app.cli:main"
+irs-mcp = "app.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
